@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sizing de Aplicações</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body data-theme="light">
+    <div class="container">
+        <header>
+            <h1>Sizing de Aplicações</h1>
+            <div>
+                <button id="new-btn" class="btn">🆕 Novo</button>
+                <button id="theme-toggle" class="btn">🌙 Tema</button>
+            </div>
+        </header>
+        <main>
+            <div class="form">
+                <div><label for="sizing-name">Nome do Sizing</label><input type="text" id="sizing-name"
+                        placeholder="Projeto X" /></div>
+                <div><label for="task-name">Nome da Tarefa</label><input type="text" id="task-name"
+                        placeholder="Backend" /></div>
+                <div><label id="label-start" for="task-start">Início (dias)</label><input type="number" id="task-start"
+                        min="0" placeholder="0" /></div>
+                <div><label for="task-value">Duração</label><input type="number" id="task-value" min="1" value="1" />
+                </div>
+                <div><label for="task-unit">Unidade</label><select id="task-unit">
+                        <option value="days">Dias</option>
+                        <option value="hours">Horas</option>
+                    </select></div>
+                <div class="form-actions">
+                    <button id="add-btn" class="btn btn-primary">Adicionar Tarefa</button>
+                    <button id="save-btn" class="btn btn-secondary">Salvar Sizing</button>
+                    <button id="export-btn" class="btn btn-secondary">Exportar CSV</button>
+                    <button id="save-as-btn" class="btn btn-secondary">Salvar como...</button>
+
+                </div>
+
+            </div>
+
+
+            <div class="overview">
+                <h2>Visão Geral</h2>
+                <p>Total de dias: <strong id="total-days">0.00</strong></p>
+                <canvas id="chart"></canvas>
+            </div>
+            <div class="tasks">
+                <h2>Lista de Tarefas</h2>
+                <ul id="tasks-ul"></ul>
+            </div>
+            <div class="gallery">
+                <h2>Galeria de Sizings</h2>
+                <ul id="gallery-ul"></ul>
+            </div>
+        </main>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="script.js">
+
+    </script>
+</body>
+
+</html>

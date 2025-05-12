@@ -57,7 +57,9 @@ function renderTasks() {
 }
 
 
-function clearAll() { tasks.length = 0;['sizing-name', 'task-name', 'task-start', 'task-value'].forEach(id => document.getElementById(id).value = id === 'task-start' ? '' : ''); updateOverview(); renderTasks(); }
+function clearAll() {
+    tasks.length = 0;['sizing-name', 'task-name', 'task-start', 'task-value'].forEach(id => document.getElementById(id).value = id === 'task-start' ? '' : ''); updateOverview(); renderTasks();
+}
 document.getElementById('new-btn').addEventListener('click', clearAll);
 
 function updateGallery() {
@@ -142,5 +144,19 @@ document.getElementById('task-unit').addEventListener('change', e => { const isD
 document.getElementById('add-btn').addEventListener('click', () => { const name = document.getElementById('task-name').value.trim(); const start = parseFloat(document.getElementById('task-start').value) || parseFloat(document.getElementById('task-start').placeholder); const value = parseFloat(document.getElementById('task-value').value); const unit = document.getElementById('task-unit').value; if (!name || value <= 0) return; if (unit === 'days' && start < 0) return; const amount = unit === 'hours' ? value / 8 : value; tasks.push({ name, start: unit === 'days' ? start : 0, amount }); document.getElementById('task-name').value = ''; document.getElementById('task-value').value = '1'; updateOverview(); renderTasks(); updateSuggestion(); });
 document.getElementById('save-btn').addEventListener('click', () => { const name = document.getElementById('sizing-name').value.trim(); if (!name) return; const storage = JSON.parse(localStorage.getItem('sizings') || '{}'); storage[name] = tasks.slice(); localStorage.setItem('sizings', JSON.stringify(storage)); updateGallery(); });
 document.getElementById('export-btn').addEventListener('click', () => { let csv = 'Name,Start (days),Duration (days)\n'; tasks.forEach(t => csv += `${t.name},${t.start},${t.amount.toFixed(2)}\n`); const blob = new Blob([csv], { type: 'text/csv' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'tasks.csv'; a.click(); URL.revokeObjectURL(url); });
+
+document.getElementById('export-img-btn').addEventListener('click', () => {
+    if (!chart) return;
+    // Gera o dataURL em PNG
+    const url = chart.toBase64Image();
+    // Cria elemento <a> para download
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${document.getElementById('sizing-name').value || 'chart'}.png`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+});
+
 // init
 updateGallery(); updateOverview(); updateSuggestion();

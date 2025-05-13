@@ -121,10 +121,26 @@ function renderTasks() {
     editBtn.textContent = "✏️";
     editBtn.className = "btn";
     editBtn.style.marginLeft = "10px";
+
     editBtn.addEventListener("click", () => {
       document.getElementById("task-name").value = t.name;
-      document.getElementById("task-start").value = t.start;
-      document.getElementById("task-value").value = t.amount;
+      const unit = document.getElementById("task-unit").value;
+
+      if (unit === "days") {
+        document.getElementById("task-start").value = t.start;
+        document.getElementById("task-value").value = t.amount;
+      } else {
+        document.getElementById("task-unit").dispatchEvent(new Event("change"));
+
+        setTimeout(() => {
+          const totalHoras = t.amount * 8;
+          const horas = Math.floor(totalHoras);
+          const minutos = Math.round((totalHoras - horas) * 60);
+          document.getElementById("task-hours").value = horas;
+          document.getElementById("task-minutes").value = minutos;
+        }, 0);
+      }
+
       tasks.splice(i, 1);
       updateOverview();
       renderTasks();
@@ -160,9 +176,18 @@ function clearAll() {
     "task-hours",
     "task-minutes",
   ];
+
   ids.forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.value = id === "task-start" ? "" : "";
+    if (el) {
+      if (id === "task-start") {
+        el.value = 0;
+      } else if (id === "task-value") {
+        el.value = 1;
+      } else {
+        el.value = "";
+      }
+    }
   });
 
   updateOverview();
@@ -291,15 +316,19 @@ document.getElementById("add-btn").addEventListener("click", () => {
     parseFloat(document.getElementById("task-start").placeholder);
 
   let amount = 0;
+
   if (unit === "days") {
-    amount = parseFloat(document.getElementById("task-value").value);
+    const valueInput = document.getElementById("task-value").value;
+    if (!valueInput || isNaN(valueInput)) return;
+
+    amount = parseFloat(valueInput);
     if (tasks.length === 0) start = 0;
     if (!name || amount <= 0 || start < 0) return;
   } else {
     const hours = parseInt(document.getElementById("task-hours").value) || 0;
     const minutes =
       parseInt(document.getElementById("task-minutes").value) || 0;
-    amount = (hours + minutes / 60) / 8; // convertendo para fração de dias
+    amount = (hours + minutes / 60) / 8;
     if (!name || amount <= 0) return;
     start = 0;
   }
@@ -329,6 +358,21 @@ document.getElementById("save-btn").addEventListener("click", () => {
   localStorage.setItem("sizings", JSON.stringify(storage));
   updateGallery();
 });
+
+document.getElementById("export-btn").addEventListener("click", () => {
+  let csv = "Name,Start (days),Duration (days)\n";
+  tasks.forEach(
+    (t) => (csv += `${t.name},${t.start},${t.amount.toFixed(2)}\n`)
+  );
+  const blob = new Blob([csv], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "tasks.csv";
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
 document.getElementById("export-btn").addEventListener("click", () => {
   let csv = "Name,Start (days),Duration (days)\n";
   tasks.forEach(
@@ -357,6 +401,7 @@ document.getElementById("export-img-btn").addEventListener("click", () => {
   chart.draw = function () {
     ctx.save();
     ctx.fillStyle = bgColor;
+    ctx.textColor = textColor;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.restore();
     originalDraw.call(this);

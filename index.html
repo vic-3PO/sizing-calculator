@@ -3,86 +3,343 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Sizing de Aplicações</title>
+    <title>Sizing Calculator Pro</title>
     <link rel="stylesheet" href="style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
   </head>
-
   <body data-theme="light">
-    <div class="container">
-      <header>
-        <h1>Sizing de Aplicações</h1>
-        <div>
-          <button id="new-btn" class="btn">🆕 Novo</button>
-          <button id="theme-toggle" class="btn">🌙 Tema</button>
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Confirmation Modal -->
+    <div id="confirmation-modal" class="modal-overlay hidden">
+      <div class="modal">
+        <div class="modal-header">
+          <h3 id="modal-title">Confirmar Ação</h3>
         </div>
-      </header>
-      <main>
-        <div class="form">
-          <div>
-            <label for="sizing-name">Nome do Sizing</label
-            ><input type="text" id="sizing-name" placeholder="Projeto X" />
+        <div class="modal-body">
+          <p id="modal-message">Tem certeza que deseja continuar?</p>
+        </div>
+        <div class="modal-footer">
+          <button id="modal-cancel" class="btn btn--secondary">Cancelar</button>
+          <button id="modal-confirm" class="btn btn--primary">Confirmar</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Header -->
+    <header class="header">
+      <div class="header-content">
+        <div class="header-left">
+          <h1 class="header-title">
+            <span class="header-icon">📊</span>
+            Sizing Calculator Pro
+          </h1>
+          <div class="breadcrumb" id="breadcrumb">
+            <span>Novo Projeto</span>
           </div>
-          <div>
-            <label for="task-name">Nome da Tarefa</label
-            ><input type="text" id="task-name" placeholder="Backend" />
-          </div>
-          <div>
-            <label id="label-start" for="task-start">Início (dias)</label
-            ><input
-              type="number"
-              id="task-start"
-              value="0"
-              min="0"
-              placeholder="0"
-            />
+        </div>
+        <div class="header-right">
+          <button id="undo-btn" class="btn btn--icon" title="Desfazer" disabled>
+            <span>↶</span>
+          </button>
+          <button id="redo-btn" class="btn btn--icon" title="Refazer" disabled>
+            <span>↷</span>
+          </button>
+          <button id="new-project-btn" class="btn btn--primary">
+            <span>➕</span> Novo Projeto
+          </button>
+          <button id="theme-toggle" class="btn btn--icon" title="Alternar Tema">
+            <span class="theme-icon">🌙</span>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <div class="main-container">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="sidebar-content">
+          <div class="form-section">
+            <h2>Configuração do Projeto</h2>
+
+            <div class="form-group">
+              <label for="project-name" class="form-label"
+                >Nome do Projeto</label
+              >
+              <input
+                type="text"
+                id="project-name"
+                class="form-control"
+                placeholder="Ex: Sistema Web"
+                maxlength="50"
+              />
+              <div class="error-message" id="project-name-error"></div>
+            </div>
+
+            <div class="form-group">
+              <label for="task-unit" class="form-label">Unidade de Tempo</label>
+              <select id="task-unit" class="form-control">
+                <option value="days">Dias</option>
+                <option value="hours">Horas</option>
+              </select>
+            </div>
           </div>
 
-          <div id="duration-container">
-            <label for="task-value">Duração</label>
-            <input type="number" id="task-value" min="1" value="1" />
+          <div class="form-section">
+            <h3>Adicionar Tarefa</h3>
+
+            <div class="form-group">
+              <label for="task-name" class="form-label">Nome da Tarefa *</label>
+              <input
+                type="text"
+                id="task-name"
+                class="form-control"
+                placeholder="Ex: Desenvolvimento Backend"
+                maxlength="100"
+                required
+              />
+              <div class="error-message" id="task-name-error"></div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group" id="task-start-group">
+                <label for="task-start" class="form-label">Início</label>
+                <input
+                  type="number"
+                  id="task-start"
+                  class="form-control"
+                  min="0"
+                  value="0"
+                  placeholder="0"
+                />
+                <div class="error-message" id="task-start-error"></div>
+              </div>
+
+              <div class="form-group">
+                <label for="task-duration" class="form-label">Duração *</label>
+                <input
+                  type="number"
+                  id="task-duration"
+                  class="form-control"
+                  min="0.1"
+                  step="0.1"
+                  value="1"
+                  placeholder="1"
+                  required
+                />
+                <div class="error-message" id="task-duration-error"></div>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="task-priority" class="form-label">Prioridade</label>
+                <select id="task-priority" class="form-control">
+                  <option value="low">Baixa</option>
+                  <option value="medium" selected>Média</option>
+                  <option value="high">Alta</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="task-category" class="form-label">Categoria</label>
+                <input
+                  type="text"
+                  id="task-category"
+                  class="form-control"
+                  placeholder="Ex: Backend"
+                  list="categories-list"
+                />
+                <datalist id="categories-list"></datalist>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="task-dependencies" class="form-label"
+                >Dependências</label
+              >
+              <select id="task-dependencies" class="form-control" multiple>
+                <option value="" disabled>Nenhuma tarefa disponível</option>
+              </select>
+              <small class="form-help"
+                >Segure Ctrl/Cmd para selecionar múltiplas</small
+              >
+            </div>
+
+            <div class="form-actions">
+              <button
+                id="add-task-btn"
+                class="btn btn--primary btn--full-width"
+              >
+                ➕ Adicionar Tarefa
+              </button>
+            </div>
           </div>
 
-          <div>
-            <label for="task-unit">Unidade</label
-            ><select id="task-unit">
-              <option value="days">Dias</option>
-              <option value="hours">Horas</option>
-            </select>
-          </div>
-          <div class="form-actions">
-            <button id="add-btn" class="btn btn-primary">
-              Adicionar Tarefa
-            </button>
-            <button id="save-btn" class="btn btn-secondary">
-              Salvar Sizing
-            </button>
-            <button id="export-btn" class="btn btn-secondary">
-              Exportar CSV
-            </button>
-            <button id="export-img-btn" class="btn btn-secondary">
-              Exportar Imagem
-            </button>
-            <!-- <button id="save-as-btn" class="btn btn-secondary">
-              Salvar como...
-            </button> -->
+          <div class="templates-section">
+            <h3>Templates Rápidos</h3>
+            <div class="template-buttons" id="template-buttons"></div>
           </div>
         </div>
+      </aside>
 
-        <div class="overview">
-          <h2>Visão Geral</h2>
-          <p>Total de dias: <strong id="total-days">0.00</strong></p>
-          <canvas id="chart"></canvas>
-        </div>
-        <div class="tasks">
-          <h2>Lista de Tarefas</h2>
-          <ul id="tasks-ul"></ul>
-        </div>
-        <div class="gallery">
-          <h2>Galeria de Sizings</h2>
-          <ul id="gallery-ul"></ul>
-        </div>
+      <!-- Main Content -->
+      <main class="main-content">
+        <!-- Overview -->
+        <section class="overview-section">
+          <div class="overview-cards">
+            <div class="overview-card">
+              <div class="overview-icon">📅</div>
+              <div class="overview-content">
+                <div class="overview-value" id="total-duration">0</div>
+                <div class="overview-label" id="duration-unit">dias</div>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="overview-icon">📋</div>
+              <div class="overview-content">
+                <div class="overview-value" id="total-tasks">0</div>
+                <div class="overview-label">tarefas</div>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="overview-icon">🎯</div>
+              <div class="overview-content">
+                <div class="overview-value" id="completion-date">-</div>
+                <div class="overview-label">conclusão</div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Chart Section -->
+        <section class="chart-section">
+          <div class="section-header">
+            <h2>Cronograma Visual</h2>
+            <div class="chart-controls">
+              <button id="chart-zoom-out" class="btn btn--sm btn--secondary">
+                🔍-
+              </button>
+              <button id="chart-zoom-in" class="btn btn--sm btn--secondary">
+                🔍+
+              </button>
+              <button id="chart-reset" class="btn btn--sm btn--secondary">
+                ↻
+              </button>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="timeline-chart"></canvas>
+            <div class="chart-empty" id="chart-empty">
+              <div class="empty-icon">📊</div>
+              <h3>Gráfico Vazio</h3>
+              <p>Adicione algumas tarefas para ver o cronograma visual.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tasks Section -->
+        <section class="tasks-section">
+          <div class="section-header">
+            <h2>Lista de Tarefas</h2>
+            <div class="tasks-controls">
+              <input
+                type="text"
+                id="search-tasks"
+                class="form-control form-control--sm"
+                placeholder="🔍 Buscar tarefas..."
+              />
+              <select
+                id="filter-priority"
+                class="form-control form-control--sm"
+              >
+                <option value="">Todas as prioridades</option>
+                <option value="low">Baixa</option>
+                <option value="medium">Média</option>
+                <option value="high">Alta</option>
+              </select>
+            </div>
+          </div>
+          <div class="tasks-table-container">
+            <table class="tasks-table" id="tasks-table">
+              <thead>
+                <tr>
+                  <th>Tarefa</th>
+                  <th>Início</th>
+                  <th>Duração</th>
+                  <th>Prioridade</th>
+                  <th>Categoria</th>
+                  <th>Dependências</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tasks-tbody"></tbody>
+            </table>
+            <div class="tasks-empty" id="tasks-empty">
+              <div class="empty-icon">📝</div>
+              <h3>Nenhuma Tarefa</h3>
+              <p>
+                Comece adicionando sua primeira tarefa usando o formulário ao
+                lado.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Export Section -->
+        <section class="export-section">
+          <div class="section-header">
+            <h2>Exportar Projeto</h2>
+          </div>
+          <div class="export-buttons">
+            <button id="save-project-btn" class="btn btn--primary">
+              💾 Salvar Projeto
+            </button>
+            <button id="export-csv-btn" class="btn btn--secondary">
+              📊 CSV
+            </button>
+            <button id="export-json-btn" class="btn btn--secondary">
+              📄 JSON
+            </button>
+            <button id="export-image-btn" class="btn btn--secondary">
+              🖼️ PNG
+            </button>
+          </div>
+        </section>
+
+        <!-- Projects Gallery -->
+        <section class="gallery-section">
+          <div class="section-header">
+            <h2>Projetos Salvos</h2>
+            <button id="clear-all-projects" class="btn btn--sm btn--outline">
+              🗑️ Limpar Todos
+            </button>
+          </div>
+          <div class="gallery-grid" id="gallery-grid">
+            <div class="gallery-empty" id="gallery-empty">
+              <div class="empty-icon">📁</div>
+              <h3>Nenhum Projeto Salvo</h3>
+              <p>Seus projetos salvos aparecerão aqui.</p>
+            </div>
+          </div>
+        </section>
       </main>
     </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+      <div class="loading-spinner">
+        <div class="spinner"></div>
+        <p>Processando...</p>
+      </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="script.js"></script>
   </body>

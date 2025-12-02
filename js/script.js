@@ -146,6 +146,7 @@ class SizingCalculator {
     this.initChart();
 
     // Load theme preference
+    this.storage = new StorageManager();
     const savedTheme =
       localStorage.getItem("sizing-calculator-theme") || "light";
     this.setTheme(savedTheme);
@@ -153,11 +154,13 @@ class SizingCalculator {
 
   createEmptyProject() {
     return {
-      id: this.generateId(),
+      id: calculateUtils.generateId(),
       name: "Novo Projeto",
       created: Date.now(),
       modified: Date.now(),
       unit: "days",
+      // ✨ NOVO: Data de início do projeto
+      startDate: new Date().toISOString().split("T")[0], // Data de hoje no formato YYYY-MM-DD
       settings: {
         theme: "light",
         autoSave: true,
@@ -177,6 +180,14 @@ class SizingCalculator {
       const newTheme = currentTheme === "dark" ? "light" : "dark";
       this.setTheme(newTheme);
     });
+
+    document
+      .getElementById("project-start-date")
+      .addEventListener("change", (e) => {
+        this.currentProject.startDate = e.target.value;
+        this.updateUI(); // Recalcular datas
+        this.autoSave();
+      });
 
     // New project
     document.getElementById("new-project-btn").addEventListener("click", () => {
@@ -351,7 +362,13 @@ class SizingCalculator {
     this.updateUI();
     this.updateChart();
     this.updateBreadcrumb();
+
+    // ✨ NOVO: Limpar campo de nome
     document.getElementById("project-name").value = "";
+
+    // ✨ NOVO: Atualizar campo de data
+    this.updateProjectStartDateField();
+
     this.resetForm();
     this.showToast("success", "Novo Projeto", "Projeto criado com sucesso!");
   }
@@ -578,12 +595,22 @@ class SizingCalculator {
     document.getElementById("add-task-btn").disabled = true;
   }
 
+  updateProjectStartDateField() {
+    const dateInput = document.getElementById("project-start-date");
+    if (dateInput && this.currentProject.startDate) {
+      dateInput.value = this.currentProject.startDate;
+    }
+  }
+
   updateUI() {
     this.updateOverview();
     this.updateTasksList();
     this.updateDependenciesSelect();
     this.updateUnitLabels();
     this.updateUndoRedoButtons();
+
+    // ✨ NOVO: Atualizar campo de data na UI
+    this.updateProjectStartDateField();
   }
 
   updateOverview() {
@@ -596,25 +623,51 @@ class SizingCalculator {
     document.getElementById("total-duration").textContent =
       totalDuration.toFixed(1);
     document.getElementById("total-tasks").textContent = totalTasks;
+
     document.getElementById("duration-unit").textContent =
       this.currentProject.unit === "days" ? "dias" : "horas";
 
-    // Calculate estimated completion date
+    // ✅ CORRETO: Calcular com dias úteis
     if (totalTasks > 0) {
       const maxEnd = Math.max(
         ...this.currentProject.tasks.map((task) => task.start + task.duration)
       );
-      const today = new Date();
-      const completionDate = new Date(today);
+
+      // ✨ NOVO: Parsear data corretamente para evitar erro de timezone
+      const parseProjectDate = (dateString) => {
+        if (!dateString) return new Date();
+
+        // Formato esperado: "2025-12-08"
+        const [year, month, day] = dateString.split("-");
+        // Criar sem timezone (evita UTC)
+        return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+      };
+
+      const projectStartDate = parseProjectDate(this.currentProject.startDate);
+
+      let completionDate;
 
       if (this.currentProject.unit === "days") {
-        completionDate.setDate(today.getDate() + Math.ceil(maxEnd));
+        // Se em dias, use o ConfigManager para respeitar dias úteis
+        // ✅ NOVO: Usar cálculo de dias úteis
+        completionDate = configManager.calculateEndDate(
+          projectStartDate,
+          Math.ceil(maxEnd)
+        );
       } else {
-        completionDate.setHours(today.getHours() + Math.ceil(maxEnd));
+        // Se em HORAS: Converter para dias úteis primeiro
+        // ✅ NOVO: Converter horas para dias úteis
+        const hoursPerDay = configManager.getHoursPerDay();
+        const daysNeeded = Math.ceil(maxEnd / hoursPerDay);
+
+        completionDate = configManager.calculateEndDate(
+          projectStartDate,
+          daysNeeded
+        );
       }
 
       document.getElementById("completion-date").textContent =
-        completionDate.toLocaleDateString("pt-BR");
+        calculateUtils.formatDate(completionDate);
     } else {
       document.getElementById("completion-date").textContent = "-";
     }
@@ -1148,29 +1201,20 @@ class SizingCalculator {
   }
 
   saveProject() {
-    // Get project name from input or use current project name
-    const projectNameInput = document
-      .getElementById("project-name")
-      .value.trim();
-    if (projectNameInput) {
-      this.currentProject.name = projectNameInput;
-    }
+    const projectName = document.getElementById("project-name").value.trim();
+    const displayName =
+      projectName || this.currentProject.name || "Novo Projeto";
 
-    if (
-      !this.currentProject.name ||
-      this.currentProject.name === "Novo Projeto"
-    ) {
-      this.showToast(
-        "error",
-        "Erro",
-        "Digite um nome para o projeto antes de salvar."
-      );
-      document.getElementById("project-name").focus();
-      return;
-    }
-
+    this.currentProject.name = displayName;
     this.currentProject.modified = Date.now();
 
+    // ✨ Garantir que a data está salva
+    const dateInput = document.getElementById("project-start-date");
+    if (dateInput && dateInput.value) {
+      this.currentProject.startDate = dateInput.value;
+    }
+
+    // ✨ Salvar diretamente no localStorage (sem StorageManager)
     try {
       const savedProjects = this.getSavedProjects();
       const existingIndex = savedProjects.findIndex(
@@ -1187,28 +1231,57 @@ class SizingCalculator {
         "sizing-calculator-projects",
         JSON.stringify(savedProjects)
       );
+
       this.updateGallery();
       this.updateBreadcrumb();
       this.showToast(
         "success",
         "Projeto Salvo",
-        `Projeto "${this.currentProject.name}" salvo com sucesso!`
+        `"${displayName}" foi salvo com sucesso!`
       );
     } catch (error) {
-      this.showToast(
-        "error",
-        "Erro",
-        "Falha ao salvar o projeto. Verifique o espaço de armazenamento."
-      );
+      console.error("Erro ao salvar:", error);
+      this.showToast("error", "Erro", "Falha ao salvar o projeto.");
     }
   }
 
   getSavedProjects() {
     try {
-      return JSON.parse(
-        localStorage.getItem("sizing-calculator-projects") || "[]"
-      );
-    } catch {
+      const data = localStorage.getItem("sizing-calculator-projects");
+
+      // ✨ NOVO: Se não existe, retorna array vazio
+      if (!data) {
+        return [];
+      }
+
+      // ✨ NOVO: Parsear JSON
+      let projects = JSON.parse(data);
+
+      // ✨ NOVO: Se não for array, retorna vazio
+      if (!Array.isArray(projects)) {
+        console.warn("Dados salvos não são um array válido");
+        localStorage.removeItem("sizing-calculator-projects");
+        return [];
+      }
+
+      // ✨ NOVO: Se algum item é string, tentar parsear
+      projects = projects
+        .map((project) => {
+          if (typeof project === "string") {
+            try {
+              return JSON.parse(project);
+            } catch (e) {
+              console.warn("Não foi possível parsear projeto string:", project);
+              return null;
+            }
+          }
+          return project;
+        })
+        .filter((p) => p !== null); // Remove itens que falharam
+
+      return projects;
+    } catch (error) {
+      console.error("Erro ao carregar projetos:", error);
       return [];
     }
   }
@@ -1299,33 +1372,140 @@ class SizingCalculator {
   }
 
   loadProject(projectId) {
-    const savedProjects = this.getSavedProjects();
-    const project = savedProjects.find((p) => p.id === projectId);
+    try {
+      const savedProjects = this.getSavedProjects();
 
-    if (!project) {
-      this.showToast("error", "Erro", "Projeto não encontrado.");
-      return;
+      // ✨ NOVO: Buscar projeto com verificação de tipo
+      let project = savedProjects.find((p) => {
+        if (!p || !p.id) return false;
+        return p.id === projectId;
+      });
+
+      if (!project) {
+        this.showToast("error", "Erro", "Projeto não encontrado.");
+        return;
+      }
+
+      // ✨ NOVO: Se ainda for string (por algum motivo), parsear
+      if (typeof project === "string") {
+        try {
+          project = JSON.parse(project);
+        } catch (e) {
+          this.showToast("error", "Erro", "Falha ao carregar projeto.");
+          return;
+        }
+      }
+
+      // ✨ NOVO: Deep clone para evitar referências
+      this.currentProject = JSON.parse(JSON.stringify(project));
+
+      // ✨ NOVO: Garantir que startDate existe
+      if (!this.currentProject.startDate) {
+        this.currentProject.startDate = new Date().toISOString().split("T")[0];
+      }
+
+      // Reset history
+      this.history = [];
+      this.historyIndex = -1;
+
+      // Atualizar UI
+      this.updateUI();
+      this.updateChart();
+      this.updateBreadcrumb();
+
+      // Atualizar inputs
+      document.getElementById("project-name").value =
+        this.currentProject.name || "Novo Projeto";
+      document.getElementById("task-unit").value = this.currentProject.unit;
+
+      // ✨ NOVO: Atualizar campo de data
+      const dateInput = document.getElementById("project-start-date");
+      if (dateInput) {
+        dateInput.value = this.currentProject.startDate || "";
+      }
+
+      this.showToast(
+        "success",
+        "Projeto Carregado",
+        `Projeto "${this.currentProject.name}" carregado com sucesso!`
+      );
+    } catch (error) {
+      console.error("Erro ao carregar projeto:", error);
+      this.showToast("error", "Erro", "Falha ao carregar o projeto.");
+    }
+  }
+
+  cleanupCorruptedProjects() {
+    try {
+      const data = localStorage.getItem("sizing-calculator-projects");
+
+      if (!data) {
+        console.log("Nenhum dado salvo.");
+        return;
+      }
+
+      let projects = JSON.parse(data);
+
+      // Limpar itens inválidos
+      projects = projects
+        .map((p) => {
+          if (typeof p === "string") {
+            try {
+              return JSON.parse(p);
+            } catch {
+              return null;
+            }
+          }
+          return p;
+        })
+        .filter((p) => p && p.id && p.name); // Remover inválidos
+
+      if (projects.length === 0) {
+        localStorage.removeItem("sizing-calculator-projects");
+        console.log("Todos os projetos corrompidos foram removidos.");
+        this.updateGallery();
+        return;
+      }
+
+      localStorage.setItem(
+        "sizing-calculator-projects",
+        JSON.stringify(projects)
+      );
+
+      console.log(`${projects.length} projetos válidos mantidos.`);
+      this.updateGallery();
+    } catch (error) {
+      console.error("Erro ao limpar projetos:", error);
+    }
+  }
+
+  calculateTaskEnd(task) {
+    // ✨ Usar data do projeto
+    if (!this.currentProject.startDate) {
+      this.currentProject.startDate = new Date().toISOString().split("T")[0];
     }
 
-    this.currentProject = { ...project };
-    this.history = [];
-    this.historyIndex = -1;
+    const startDate = new Date(this.currentProject.startDate);
+    startDate.setDate(startDate.getDate() + task.start);
 
-    this.updateUI();
-    this.updateChart();
-    this.updateBreadcrumb();
+    // Calcular com dias úteis
+    const endDate = configManager.calculateEndDate(startDate, task.duration);
+    return endDate;
+  }
 
-    document.getElementById("project-name").value =
-      this.currentProject.name === "Novo Projeto"
-        ? ""
-        : this.currentProject.name;
-    document.getElementById("task-unit").value = this.currentProject.unit;
-
-    this.showToast(
-      "success",
-      "Projeto Carregado",
-      `Projeto "${project.name}" carregado com sucesso!`
-    );
+  getProjectTimeline() {
+    const timeline = {
+      projectName: this.currentProject.name,
+      startDate: this.currentProject.startDate,
+      tasks: this.currentProject.tasks.map((task) => ({
+        name: task.name,
+        startDate: this.calculateTaskStart(task),
+        endDate: this.calculateTaskEnd(task), // ✨ Usa a data do projeto
+        duration: task.duration,
+        priority: task.priority,
+      })),
+    };
+    return timeline;
   }
 
   duplicateProject(projectId) {
@@ -1582,5 +1762,15 @@ class SizingCalculator {
 // Initialize the application
 const app = new SizingCalculator();
 
+const settingsUI = new SettingsUI(configManager);
+
+// Adicionar listener ao botão
+document.getElementById("settings-btn").addEventListener("click", () => {
+  settingsUI.openSettings();
+});
+
+// Sincronizar tema ao carregar
+const savedTheme = configManager.getConfig().theme;
+app.setTheme(savedTheme);
 // Make app available globally for inline event handlers
 window.app = app;

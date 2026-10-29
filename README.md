@@ -3,11 +3,14 @@
 Aplicação web para criar, editar e visualizar sizings de projetos, permitindo:
 
 * Adicionar tarefas com início e duração (em dias ou horas).
+* **Linguagem Intermediária (DSL)**: Defina tarefas usando um editor de código simplificado.
 * Visualizar gráfico Gantt simplificado (Chart.js).
 * CRUD completo de sizings salvos (LocalStorage).
 * Editar/excluir tarefas individuais.
 * Redefinir total de dias e redistribuir durações proporcionalmente.
-* Exportar dados em CSV.
+* **Drawer de tarefa** (tecla `N`): formulário lateral animado, com subtarefas, prioridade, "Adicionar e criar outra" e aviso de alterações não salvas. Tudo em horas, com totais e datas calculados automaticamente.
+* **Checklist por tarefa**: subtarefas com descrição detalhada, horas e "OK"; mostra horas totais e % concluído.
+* Exportar dados em CSV, JSON, PNG e **Excel (.xlsx)** com fórmulas (horas totais e % recalculam ao marcar OK).
 * Tema Claro/Escuro.
 
 ---

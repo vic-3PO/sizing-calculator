@@ -4,17 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sizing Calculator Pro</title>
-    <link rel="stylesheet" href="style.css" />
     <link rel="stylesheet" href="css/settings-styles.css" />
-
+    <link rel="stylesheet" href="style.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body data-theme="light">
+
     <!-- Toast Container -->
     <div id="toast-container" class="toast-container"></div>
 
@@ -34,144 +31,423 @@
       </div>
     </div>
 
+    <!-- Task Logic Modal -->
+    <div id="logic-modal" class="modal-overlay hidden">
+      <div class="modal" style="max-width: 720px;">
+        <div class="modal-header">
+          <h3 id="logic-modal-title">Lógica da Tarefa</h3>
+          <button class="modal-close" onclick="app.hideLogicModal()" aria-label="Fechar">
+            <i data-lucide="x" style="width:16px;height:16px;"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p>Descreva os passos técnicos ou pseudo-código (Portugol) para esta tarefa.</p>
+          <textarea
+            id="task-logic-editor"
+            placeholder="Ex:&#10;Início&#10;  Consultar banco de dados&#10;  Validar token de acesso&#10;  Retornar JSON formatado&#10;Fim"
+          ></textarea>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn--secondary" onclick="app.hideLogicModal()">Cancelar</button>
+          <button id="logic-modal-save" class="btn btn--primary">Salvar Lógica</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Checklist (Subtasks) Modal -->
+    <div id="checklist-modal" class="modal-overlay hidden">
+      <div class="modal modal--wide">
+        <div class="modal-header">
+          <h3 id="checklist-modal-title">Checklist da Tarefa</h3>
+          <button class="modal-close" onclick="app.hideChecklistModal()" aria-label="Fechar">
+            <i data-lucide="x" style="width:16px;height:16px;"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="checklist-description" class="form-label">Descrição detalhada da tarefa</label>
+            <textarea id="checklist-description" class="form-control" rows="2" placeholder="O que será feito nesta tarefa..."></textarea>
+          </div>
+
+          <div class="checklist-summary" id="checklist-summary"></div>
+
+          <div class="checklist-table-wrap">
+            <table class="checklist-table">
+              <thead>
+                <tr>
+                  <th class="col-ok">OK</th>
+                  <th class="col-name">Subtarefa</th>
+                  <th class="col-desc">Descrição detalhada</th>
+                  <th class="col-hours">Horas</th>
+                  <th class="col-del"></th>
+                </tr>
+              </thead>
+              <tbody id="checklist-tbody"></tbody>
+            </table>
+            <p class="form-help" id="checklist-empty-hint">
+              Sem subtarefas: a tarefa usa as horas informadas e é marcada como concluída de uma vez.
+            </p>
+          </div>
+
+          <div class="checklist-actions">
+            <button class="btn btn--secondary btn--sm" onclick="app.addSubtaskRow()">
+              <i data-lucide="plus" style="width:13px;height:13px;"></i>
+              Adicionar subtarefa
+            </button>
+            <label class="checklist-whole" id="checklist-whole-wrap">
+              <input type="checkbox" id="checklist-completed" />
+              Tarefa concluída
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn--secondary" onclick="app.hideChecklistModal()">Cancelar</button>
+          <button id="checklist-modal-save" class="btn btn--primary">Salvar</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Header -->
     <header class="header">
       <div class="header-content">
         <div class="header-left">
           <h1 class="header-title">
-            <span class="header-icon">📊</span>
-            Sizing Calculator Pro
+            <span class="header-icon">
+              <i data-lucide="bar-chart-2" style="width:20px;height:20px;"></i>
+            </span>
+            <span class="title-text">Sizing Calculator</span>
           </h1>
           <div class="breadcrumb" id="breadcrumb">
             <span>Novo Projeto</span>
           </div>
         </div>
         <div class="header-right">
-          <button id="undo-btn" class="btn btn--icon" title="Desfazer" disabled>
-            <span>↶</span>
+          <button id="undo-btn" class="btn btn--ghost btn--icon" title="Desfazer (Ctrl+Z)" disabled>
+            <i data-lucide="undo-2" style="width:15px;height:15px;"></i>
           </button>
-          <button id="redo-btn" class="btn btn--icon" title="Refazer" disabled>
-            <span>↷</span>
+          <button id="redo-btn" class="btn btn--ghost btn--icon" title="Refazer (Ctrl+Y)" disabled>
+            <i data-lucide="redo-2" style="width:15px;height:15px;"></i>
           </button>
-          <button id="new-project-btn" class="btn btn--primary">
-            <span>➕</span> Novo Projeto
+          <button id="new-project-btn" class="btn btn--ghost" title="Novo Projeto (Ctrl+N)">
+            <i data-lucide="plus" style="width:15px;height:15px;"></i>
+            <span>Novo Projeto</span>
           </button>
-          <!-- Botão de Configurações -->
-          <button
-            id="settings-btn"
-            class="btn btn--secondary settings-btn"
-            title="Abrir configurações"
-          >
-            ⚙️
+          <button id="settings-btn" class="btn btn--ghost btn--icon settings-btn" title="Configurações">
+            <i data-lucide="settings" style="width:15px;height:15px;"></i>
           </button>
-
-          <!-- Botão de Tema (opcional, agora gerenciado pelas configurações) -->
-          <button
-            id="theme-toggle"
-            class="btn btn--secondary"
-            style="display: none"
-          >
-            <span class="theme-icon">🌙</span>
+          <button id="theme-toggle" class="btn btn--ghost btn--icon" style="display:none;">
+            <span class="theme-icon">
+              <i data-lucide="moon" style="width:15px;height:15px;"></i>
+            </span>
           </button>
         </div>
       </div>
     </header>
 
     <div class="main-container">
-      <!-- Sidebar -->
-      <aside class="sidebar">
-        <div class="sidebar-content">
-          <div class="form-section">
-            <h2>Configuração do Projeto</h2>
+      <!-- Main Content -->
+      <main class="main-content">
 
-            <div class="form-group">
-              <label for="project-name" class="form-label"
-                >Nome do Projeto</label
-              >
+        <!-- Project bar -->
+        <section class="project-bar">
+          <div class="project-bar-fields">
+            <div class="pb-field pb-field--name">
+              <label for="project-name">Projeto</label>
               <input
                 type="text"
                 id="project-name"
-                class="form-control"
-                placeholder="Ex: Sistema Web"
+                class="pb-input"
+                placeholder="Nome do projeto"
                 maxlength="50"
               />
               <div class="error-message" id="project-name-error"></div>
             </div>
-
-            <div class="form-group">
-              <label for="task-unit" class="form-label">Unidade de Tempo</label>
-              <select id="task-unit" class="form-control">
-                <option value="days">Dias</option>
-                <option value="hours">Horas</option>
-              </select>
-            </div>
-
-            <!-- ✨ NOVO: Data de Início do Projeto -->
-            <div class="form-group">
-              <label for="project-start-date" class="form-label">
-                📅 Data de Início
-              </label>
-              <input type="date" id="project-start-date" class="form-control" />
-              <small class="form-help">
-                Data inicial para cálculo do cronograma
-              </small>
+            <div class="pb-field">
+              <label for="project-start-date">Início</label>
+              <input type="date" id="project-start-date" class="pb-input" />
             </div>
           </div>
+          <div class="project-bar-actions">
+            <div class="menu-wrap">
+              <button id="templates-btn" class="btn btn--secondary" aria-haspopup="true" aria-expanded="false">
+                <i data-lucide="layout-template" style="width:14px;height:14px;"></i>
+                Templates
+                <i data-lucide="chevron-down" style="width:13px;height:13px;"></i>
+              </button>
+              <div id="templates-menu" class="popover" role="menu">
+                <div class="template-buttons" id="template-buttons"></div>
+              </div>
+            </div>
+            <button id="open-drawer-btn" class="btn btn--primary btn--lg">
+              <i data-lucide="plus" style="width:15px;height:15px;"></i>
+              Nova tarefa
+              <kbd class="kbd">N</kbd>
+            </button>
+          </div>
+        </section>
 
-          <div class="form-section">
-            <h3>Adicionar Tarefa</h3>
+        <!-- Overview -->
+        <section class="overview-section">
+          <div class="overview-cards">
+            <div class="overview-card">
+              <div class="overview-icon">
+                <i data-lucide="calendar" style="width:20px;height:20px;"></i>
+              </div>
+              <div class="overview-content">
+                <div class="overview-value" id="total-duration">0</div>
+                <div class="overview-label" id="duration-unit">dias úteis</div>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="overview-icon">
+                <i data-lucide="layers" style="width:20px;height:20px;"></i>
+              </div>
+              <div class="overview-content">
+                <div class="overview-value" id="total-tasks">0</div>
+                <div class="overview-label">tarefas</div>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="overview-icon">
+                <i data-lucide="flag" style="width:20px;height:20px;"></i>
+              </div>
+              <div class="overview-content">
+                <div class="overview-value" id="completion-date">—</div>
+                <div class="overview-label">data de conclusão</div>
+              </div>
+            </div>
+            <div class="overview-card">
+              <div class="overview-icon">
+                <i data-lucide="clock" style="width:20px;height:20px;"></i>
+              </div>
+              <div class="overview-content">
+                <div class="overview-value" id="total-hours">0</div>
+                <div class="overview-label">horas totais</div>
+              </div>
+            </div>
+            <div class="overview-card overview-card--progress">
+              <div class="overview-icon">
+                <i data-lucide="check-circle-2" style="width:20px;height:20px;"></i>
+              </div>
+              <div class="overview-content">
+                <div class="overview-value" id="total-progress">0%</div>
+                <div class="overview-label" id="progress-label">concluído</div>
+                <div class="progress-bar"><div class="progress-bar-fill" id="total-progress-bar"></div></div>
+              </div>
+            </div>
+          </div>
+        </section>
 
-            <div class="form-group">
-              <label for="task-name" class="form-label">Nome da Tarefa *</label>
+        <!-- Chart -->
+        <section class="chart-section">
+          <div class="section-header">
+            <h2>Cronograma Visual</h2>
+            <div class="chart-controls">
+              <button id="chart-zoom-out" class="btn btn--sm btn--secondary" title="Diminuir zoom">
+                <i data-lucide="zoom-out" style="width:13px;height:13px;"></i>
+              </button>
+              <button id="chart-zoom-in" class="btn btn--sm btn--secondary" title="Aumentar zoom">
+                <i data-lucide="zoom-in" style="width:13px;height:13px;"></i>
+              </button>
+              <button id="chart-reset" class="btn btn--sm btn--secondary" title="Resetar zoom">
+                <i data-lucide="rotate-ccw" style="width:13px;height:13px;"></i>
+              </button>
+            </div>
+          </div>
+          <div class="chart-container">
+            <canvas id="timeline-chart"></canvas>
+            <div class="chart-empty hidden" id="chart-empty">
+              <i data-lucide="bar-chart-2" class="empty-icon-svg"></i>
+              <h3>Sem dados</h3>
+              <p>Adicione tarefas para visualizar o cronograma.</p>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tasks -->
+        <section class="tasks-section">
+          <div class="section-header">
+            <h2>Lista de Tarefas</h2>
+            <div class="tasks-controls">
               <input
                 type="text"
-                id="task-name"
-                class="form-control"
-                placeholder="Ex: Desenvolvimento Backend"
-                maxlength="100"
-                required
+                id="search-tasks"
+                class="form-control form-control--sm"
+                placeholder="Buscar tarefas..."
+                style="width: 180px;"
               />
-              <div class="error-message" id="task-name-error"></div>
+              <button id="toggle-expand-btn" class="btn btn--sm btn--secondary" title="Expandir ou recolher todas">
+                <i data-lucide="chevrons-down-up" style="width:13px;height:13px;"></i>
+                <span>Expandir tudo</span>
+              </button>
+              <select id="filter-priority" class="form-control form-control--sm" style="width: 160px;">
+                <option value="">Todas as prioridades</option>
+                <option value="low">Baixa</option>
+                <option value="medium">Média</option>
+                <option value="high">Alta</option>
+              </select>
             </div>
+          </div>
+          <div class="tasks-table-container">
+            <table class="tasks-table" id="tasks-table">
+              <thead>
+                <tr>
+                  <th>Tarefa <small class="th-hint">(clique para expandir)</small></th>
+                  <th>Horas</th>
+                  <th>Progresso</th>
+                  <th>Prioridade</th>
+                  <th>Categoria</th>
+                  <th>Dependências</th>
+                  <th>Ações</th>
+                </tr>
+              </thead>
+              <tbody id="tasks-tbody"></tbody>
+            </table>
+            <div class="tasks-empty hidden" id="tasks-empty">
+              <i data-lucide="list" class="empty-icon-svg"></i>
+              <h3>Nenhuma tarefa</h3>
+              <p>Crie a primeira tarefa ou comece por um template.</p>
+              <button class="btn btn--primary" onclick="app.openDrawer()">
+                <i data-lucide="plus" style="width:14px;height:14px;"></i>
+                Criar primeira tarefa
+              </button>
+              <div class="empty-templates" id="empty-templates"></div>
+            </div>
+          </div>
+        </section>
 
-            <div class="form-row">
-              <div class="form-group" id="task-start-group">
-                <label for="task-start" class="form-label">Início</label>
-                <input
-                  type="number"
-                  id="task-start"
-                  class="form-control"
-                  min="0"
-                  value="0"
-                  placeholder="0"
-                />
-                <div class="error-message" id="task-start-error"></div>
-              </div>
+        <!-- Export -->
+        <section class="export-section">
+          <div class="section-header">
+            <h2>Exportar Projeto</h2>
+          </div>
+          <div class="export-buttons">
+            <button id="save-project-btn" class="btn btn--primary">
+              <i data-lucide="save" style="width:14px;height:14px;"></i>
+              Salvar Projeto
+            </button>
+            <button id="export-csv-btn" class="btn btn--secondary">
+              <i data-lucide="table-2" style="width:14px;height:14px;"></i>
+              CSV
+            </button>
+            <button id="export-xlsx-btn" class="btn btn--secondary">
+              <i data-lucide="file-spreadsheet" style="width:14px;height:14px;"></i>
+              Excel
+            </button>
+            <button id="export-json-btn" class="btn btn--secondary">
+              <i data-lucide="file-json" style="width:14px;height:14px;"></i>
+              JSON
+            </button>
+            <button id="export-image-btn" class="btn btn--secondary">
+              <i data-lucide="image" style="width:14px;height:14px;"></i>
+              PNG
+            </button>
+          </div>
+        </section>
+
+        <!-- Projects Gallery -->
+        <section class="gallery-section">
+          <div class="section-header">
+            <h2>Projetos Salvos</h2>
+            <button id="clear-all-projects" class="btn btn--sm btn--outline">
+              <i data-lucide="trash-2" style="width:13px;height:13px;"></i>
+              Limpar Todos
+            </button>
+          </div>
+          <div class="gallery-grid" id="gallery-grid">
+            <div class="gallery-empty" id="gallery-empty">
+              <i data-lucide="folder-open" class="empty-icon-svg"></i>
+              <h3>Nenhum projeto salvo</h3>
+              <p>Seus projetos salvos aparecerão aqui.</p>
+            </div>
+          </div>
+        </section>
+
+      </main>
+    </div>
+
+    <!-- Task Drawer -->
+    <div id="drawer-backdrop" class="drawer-backdrop" aria-hidden="true"></div>
+    <aside id="task-drawer" class="drawer" role="dialog" aria-modal="true" aria-labelledby="form-title" aria-hidden="true">
+      <header class="drawer-header">
+        <div>
+          <h2 id="form-title">Nova tarefa</h2>
+          <p class="drawer-sub">Preencha o essencial. Subtarefas são opcionais.</p>
+        </div>
+        <button class="modal-close" id="drawer-close" aria-label="Fechar">
+          <i data-lucide="x" style="width:16px;height:16px;"></i>
+        </button>
+      </header>
+
+      <div class="section-tabs">
+        <button id="form-mode-btn" class="tab-btn active">Formulário</button>
+        <button id="dsl-mode-btn" class="tab-btn">Código DSL</button>
+      </div>
+
+      <div class="drawer-body">
+            <div id="form-container">
 
               <div class="form-group">
-                <label for="task-duration" class="form-label">Duração *</label>
+                <label for="task-name" class="form-label">O que será feito? *</label>
                 <input
-                  type="number"
-                  id="task-duration"
-                  class="form-control"
-                  min="0.1"
-                  step="0.1"
-                  value="1"
-                  placeholder="1"
+                  type="text"
+                  id="task-name"
+                  class="form-control form-control--lg"
+                  placeholder="Ex: Desenvolvimento Backend"
+                  maxlength="100"
+                  autocomplete="off"
                   required
                 />
+                <div class="error-message" id="task-name-error"></div>
+              </div>
+
+              <div class="form-group">
+                <label for="task-description" class="form-label">Descrição detalhada</label>
+                <textarea
+                  id="task-description"
+                  class="form-control"
+                  rows="3"
+                  placeholder="Detalhe o que precisa ser entregue..."
+                ></textarea>
+              </div>
+
+              <div class="form-group">
+                <label for="task-duration" class="form-label">Horas estimadas *</label>
+                <div class="input-suffix">
+                  <input
+                    type="number"
+                    id="task-duration"
+                    class="form-control"
+                    min="0.5"
+                    step="0.5"
+                    value="1"
+                    required
+                  />
+                  <span class="input-suffix-text">h</span>
+                </div>
+                <small class="form-help" id="task-duration-help">Ou divida em subtarefas abaixo.</small>
                 <div class="error-message" id="task-duration-error"></div>
               </div>
-            </div>
 
-            <div class="form-row">
+              <div class="subtask-builder">
+                <div class="subtask-builder-head">
+                  <span class="form-label">Subtarefas <em>(opcional)</em></span>
+                  <span class="subtask-total" id="form-subtask-total"></span>
+                </div>
+                <div id="form-subtasks"></div>
+                <button type="button" id="add-form-subtask-btn" class="btn btn--sm btn--secondary btn--full-width">
+                  <i data-lucide="plus" style="width:13px;height:13px;"></i>
+                  Adicionar subtarefa
+                </button>
+              </div>
+
               <div class="form-group">
-                <label for="task-priority" class="form-label">Prioridade</label>
-                <select id="task-priority" class="form-control">
-                  <option value="low">Baixa</option>
-                  <option value="medium" selected>Média</option>
-                  <option value="high">Alta</option>
-                </select>
+                <span class="form-label">Prioridade</span>
+                <div class="segmented" role="radiogroup" aria-label="Prioridade">
+                  <label class="seg seg--low"><input type="radio" name="task-priority" value="low" /><span>Baixa</span></label>
+                  <label class="seg seg--medium"><input type="radio" name="task-priority" value="medium" checked /><span>Média</span></label>
+                  <label class="seg seg--high"><input type="radio" name="task-priority" value="high" /><span>Alta</span></label>
+                </div>
               </div>
 
               <div class="form-group">
@@ -185,179 +461,56 @@
                 />
                 <datalist id="categories-list"></datalist>
               </div>
+
+              <details class="more-options">
+                <summary>Mais opções</summary>
+                <div class="form-group">
+                  <label for="task-dependencies" class="form-label">Depende de</label>
+                  <select id="task-dependencies" class="form-control" multiple>
+                    <option value="" disabled>Nenhuma tarefa disponível</option>
+                  </select>
+                  <small class="form-help">Segure Ctrl/Cmd para múltiplas.</small>
+                </div>
+              </details>
             </div>
 
-            <div class="form-group">
-              <label for="task-dependencies" class="form-label">
-                Dependências
-              </label>
-              <select id="task-dependencies" class="form-control" multiple>
-                <option value="" disabled>Nenhuma tarefa disponível</option>
-              </select>
-              <small class="form-help">
-                Segure Ctrl/Cmd para selecionar múltiplas
-              </small>
+            <div id="dsl-container" class="hidden">
+              <h3>Editor de Código</h3>
+              <div class="form-group">
+                <textarea
+                  id="dsl-editor"
+                  class="form-control dsl-editor"
+                  rows="12"
+                  placeholder='task "Minha Tarefa" {
+  duration: 5;
+  priority: high;
+  category: "Design";
+}'></textarea>
+                <small class="form-help">Defina tarefas com a linguagem simplificada.</small>
+              </div>
+              <div class="form-actions">
+                <button id="apply-dsl-btn" class="btn btn--primary btn--full-width">
+                  <i data-lucide="play" style="width:14px;height:14px;"></i>
+                  Aplicar Código
+                </button>
+              </div>
             </div>
+      </div>
 
-            <div class="form-actions">
-              <button
-                id="add-task-btn"
-                class="btn btn--primary btn--full-width"
-              >
-                ➕ Adicionar Tarefa
-              </button>
-            </div>
-          </div>
-
-          <div class="templates-section">
-            <h3>Templates Rápidos</h3>
-            <div class="template-buttons" id="template-buttons"></div>
-          </div>
+      <footer class="drawer-footer">
+        <div class="drawer-summary" id="drawer-summary" aria-live="polite">0h</div>
+        <div class="drawer-footer-actions">
+          <button id="drawer-cancel" class="btn btn--secondary">Cancelar</button>
+          <button id="add-another-btn" class="btn btn--secondary" disabled>Adicionar e criar outra</button>
+          <button id="add-task-btn" class="btn btn--primary" disabled>
+            <span id="add-task-label">Adicionar tarefa</span>
+          </button>
         </div>
-      </aside>
+      </footer>
+    </aside>
 
-      <!-- Main Content -->
-      <main class="main-content">
-        <!-- Overview -->
-        <section class="overview-section">
-          <div class="overview-cards">
-            <div class="overview-card">
-              <div class="overview-icon">📅</div>
-              <div class="overview-content">
-                <div class="overview-value" id="total-duration">0</div>
-                <div class="overview-label" id="duration-unit">dias</div>
-              </div>
-            </div>
-            <div class="overview-card">
-              <div class="overview-icon">📋</div>
-              <div class="overview-content">
-                <div class="overview-value" id="total-tasks">0</div>
-                <div class="overview-label">tarefas</div>
-              </div>
-            </div>
-            <div class="overview-card">
-              <div class="overview-icon">🎯</div>
-              <div class="overview-content">
-                <div class="overview-value" id="completion-date">-</div>
-                <div class="overview-label">conclusão</div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Chart Section -->
-        <section class="chart-section">
-          <div class="section-header">
-            <h2>Cronograma Visual</h2>
-            <div class="chart-controls">
-              <button id="chart-zoom-out" class="btn btn--sm btn--secondary">
-                🔍-
-              </button>
-              <button id="chart-zoom-in" class="btn btn--sm btn--secondary">
-                🔍+
-              </button>
-              <button id="chart-reset" class="btn btn--sm btn--secondary">
-                ↻
-              </button>
-            </div>
-          </div>
-          <div class="chart-container">
-            <canvas id="timeline-chart"></canvas>
-            <div class="chart-empty" id="chart-empty">
-              <div class="empty-icon">📊</div>
-              <h3>Gráfico Vazio</h3>
-              <p>Adicione algumas tarefas para ver o cronograma visual.</p>
-            </div>
-          </div>
-        </section>
-
-        <!-- Tasks Section -->
-        <section class="tasks-section">
-          <div class="section-header">
-            <h2>Lista de Tarefas</h2>
-            <div class="tasks-controls">
-              <input
-                type="text"
-                id="search-tasks"
-                class="form-control form-control--sm"
-                placeholder="🔍 Buscar tarefas..."
-              />
-              <select
-                id="filter-priority"
-                class="form-control form-control--sm"
-              >
-                <option value="">Todas as prioridades</option>
-                <option value="low">Baixa</option>
-                <option value="medium">Média</option>
-                <option value="high">Alta</option>
-              </select>
-            </div>
-          </div>
-          <div class="tasks-table-container">
-            <table class="tasks-table" id="tasks-table">
-              <thead>
-                <tr>
-                  <th>Tarefa</th>
-                  <th>Início</th>
-                  <th>Duração</th>
-                  <th>Prioridade</th>
-                  <th>Categoria</th>
-                  <th>Dependências</th>
-                  <th>Ações</th>
-                </tr>
-              </thead>
-              <tbody id="tasks-tbody"></tbody>
-            </table>
-            <div class="tasks-empty" id="tasks-empty">
-              <div class="empty-icon">📝</div>
-              <h3>Nenhuma Tarefa</h3>
-              <p>
-                Comece adicionando sua primeira tarefa usando o formulário ao
-                lado.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <!-- Export Section -->
-        <section class="export-section">
-          <div class="section-header">
-            <h2>Exportar Projeto</h2>
-          </div>
-          <div class="export-buttons">
-            <button id="save-project-btn" class="btn btn--primary">
-              💾 Salvar Projeto
-            </button>
-            <button id="export-csv-btn" class="btn btn--secondary">
-              📊 CSV
-            </button>
-            <button id="export-json-btn" class="btn btn--secondary">
-              📄 JSON
-            </button>
-            <button id="export-image-btn" class="btn btn--secondary">
-              🖼️ PNG
-            </button>
-          </div>
-        </section>
-
-        <!-- Projects Gallery -->
-        <section class="gallery-section">
-          <div class="section-header">
-            <h2>Projetos Salvos</h2>
-            <button id="clear-all-projects" class="btn btn--sm btn--outline">
-              🗑️ Limpar Todos
-            </button>
-          </div>
-          <div class="gallery-grid" id="gallery-grid">
-            <div class="gallery-empty" id="gallery-empty">
-              <div class="empty-icon">📁</div>
-              <h3>Nenhum Projeto Salvo</h3>
-              <p>Seus projetos salvos aparecerão aqui.</p>
-            </div>
-          </div>
-        </section>
-      </main>
-    </div>
+    <!-- Row actions menu -->
+    <div id="row-menu" class="popover popover--fixed" role="menu"></div>
 
     <!-- Loading Overlay -->
     <div id="loading-overlay" class="loading-overlay hidden">
@@ -367,14 +520,19 @@
       </div>
     </div>
 
+    <!-- Scripts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <!-- Configurações -->
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
     <script src="js/config.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/validators.js"></script>
+    <script src="js/dsl-parser.js"></script>
     <script src="js/settings-ui.js"></script>
-
-    <!-- Script principal -->
     <script src="js/script.js"></script>
+    <script>
+      // Initialize Lucide icons after all scripts load
+      if (typeof lucide !== 'undefined') lucide.createIcons();
+    </script>
   </body>
 </html>

@@ -6,6 +6,7 @@ class SizingCalculator {
     this.maxHistorySize = 10;
     this.chart = null;
     this.autoSaveTimeout = null;
+    this.dslParser = new DSLParser();
 
     // Sample data
     this.sampleData = {
@@ -158,7 +159,7 @@ class SizingCalculator {
       name: "Novo Projeto",
       created: Date.now(),
       modified: Date.now(),
-      unit: "days",
+      unit: "hours",
       // ✨ NOVO: Data de início do projeto
       startDate: new Date().toISOString().split("T")[0], // Data de hoje no formato YYYY-MM-DD
       settings: {
@@ -220,20 +221,53 @@ class SizingCalculator {
       }, 300)
     );
 
-    document.getElementById("task-unit").addEventListener("change", (e) => {
-      this.currentProject.unit = e.target.value;
-      this.updateUI();
-      this.saveState();
-      this.autoSave();
-    });
-
     // Task form
     document
       .getElementById("add-task-btn")
       .addEventListener("click", () => this.addTask());
+    document
+      .getElementById("add-another-btn")
+      .addEventListener("click", () => this.addTask(true));
+
+    // Drawer
+    document
+      .getElementById("open-drawer-btn")
+      .addEventListener("click", () => this.openDrawer());
+    document
+      .getElementById("drawer-close")
+      .addEventListener("click", () => this.requestCloseDrawer());
+    document
+      .getElementById("drawer-cancel")
+      .addEventListener("click", () => this.closeDrawer());
+    document
+      .getElementById("drawer-backdrop")
+      .addEventListener("click", () => this.requestCloseDrawer());
+    document
+      .getElementById("task-drawer")
+      .addEventListener("keydown", (e) => this.trapFocus(e));
+
+    // Popover menus (templates + row actions)
+    document.getElementById("templates-btn").addEventListener("click", (e) => {
+      e.stopPropagation();
+      this.closeRowMenu();
+      const menu = document.getElementById("templates-menu");
+      const open = !menu.classList.contains("is-open");
+      menu.classList.toggle("is-open", open);
+      e.currentTarget.setAttribute("aria-expanded", String(open));
+    });
+    document.addEventListener("click", () => this.closeMenus());
+    window.addEventListener("scroll", () => this.closeRowMenu(), true);
+    window.addEventListener("resize", () => this.closeRowMenu());
 
     // Form validation - Fixed
-    ["task-name", "task-duration", "task-start"].forEach((id) => {
+    document
+      .getElementById("add-form-subtask-btn")
+      .addEventListener("click", () => this.addFormSubtask());
+    document
+      .getElementById("toggle-expand-btn")
+      .addEventListener("click", () => this.toggleExpandAll());
+
+    ["task-name", "task-duration"].forEach((id) => {
       const element = document.getElementById(id);
       element.addEventListener("input", () => this.validateTaskForm());
       element.addEventListener("blur", () => this.validateTaskForm());
@@ -241,7 +275,7 @@ class SizingCalculator {
         if (e.key === "Enter") {
           e.preventDefault();
           if (this.validateTaskForm()) {
-            this.addTask();
+            this.addTask(e.shiftKey);
           }
         }
       });
@@ -268,6 +302,9 @@ class SizingCalculator {
     document
       .getElementById("export-csv-btn")
       .addEventListener("click", () => this.exportCSV());
+    document
+      .getElementById("export-xlsx-btn")
+      .addEventListener("click", () => this.exportXLSX());
     document
       .getElementById("export-json-btn")
       .addEventListener("click", () => this.exportJSON());
@@ -303,6 +340,26 @@ class SizingCalculator {
 
     // Keyboard shortcuts
     document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        if (this.closeMenus()) return;
+        if (this.isDrawerOpen()) this.requestCloseDrawer();
+        return;
+      }
+
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(
+        (e.target && e.target.tagName) || ""
+      );
+      const modalOpen = document.querySelector(".modal-overlay:not(.hidden)");
+      if (
+        e.key.toLowerCase() === "n" &&
+        !e.ctrlKey && !e.metaKey && !e.altKey &&
+        !typing && !modalOpen && !this.isDrawerOpen()
+      ) {
+        e.preventDefault();
+        this.openDrawer();
+        return;
+      }
+
       if (e.ctrlKey || e.metaKey) {
         switch (e.key) {
           case "z":
@@ -338,6 +395,26 @@ class SizingCalculator {
         }
       }, 300)
     );
+
+    // DSL Mode toggles
+    document
+      .getElementById("form-mode-btn")
+      .addEventListener("click", () => this.showFormTab());
+
+    document.getElementById("dsl-mode-btn").addEventListener("click", () => {
+      document.getElementById("dsl-container").classList.remove("hidden");
+      document.getElementById("form-container").classList.add("hidden");
+      document.getElementById("dsl-mode-btn").classList.add("active");
+      document.getElementById("form-mode-btn").classList.remove("active");
+      document.getElementById("task-drawer").classList.add("drawer--dsl");
+
+      // Sync editor with current tasks
+      this.updateDSLEditor();
+    });
+
+    document.getElementById("apply-dsl-btn").addEventListener("click", () => {
+      this.applyDSL();
+    });
   }
 
   setTheme(theme) {
@@ -356,6 +433,7 @@ class SizingCalculator {
   }
 
   newProject() {
+    this.editingTaskId = null;
     this.currentProject = this.createEmptyProject();
     this.history = [];
     this.historyIndex = -1;
@@ -390,12 +468,13 @@ class SizingCalculator {
   validateTaskForm() {
     const nameValid = this.validateTaskName();
     const durationValid = this.validateTaskDuration();
-    const startValid = this.validateTaskStart();
 
-    const addBtn = document.getElementById("add-task-btn");
-    addBtn.disabled = !(nameValid && durationValid && startValid);
+    const valid = nameValid && durationValid;
+    document.getElementById("add-task-btn").disabled = !valid;
+    document.getElementById("add-another-btn").disabled = !valid;
+    this.updateDrawerSummary();
 
-    return nameValid && durationValid && startValid;
+    return valid;
   }
 
   validateTaskName() {
@@ -415,7 +494,9 @@ class SizingCalculator {
 
     if (
       this.currentProject.tasks.some(
-        (task) => task.name.toLowerCase() === value.toLowerCase()
+        (task) =>
+          task.id !== this.editingTaskId &&
+          task.name.toLowerCase() === value.toLowerCase()
       )
     ) {
       this.showError(input, error, "Já existe uma tarefa com este nome");
@@ -429,15 +510,15 @@ class SizingCalculator {
   validateTaskDuration() {
     const input = document.getElementById("task-duration");
     const error = document.getElementById("task-duration-error");
-    const value = parseFloat(input.value);
+    const value = this.getFormHours();
 
     if (isNaN(value) || value <= 0) {
-      this.showError(input, error, "Duração deve ser maior que zero");
+      this.showError(input, error, "Informe as horas (maior que zero)");
       return false;
     }
 
-    if (value > 365) {
-      this.showError(input, error, "Duração muito alta (máx: 365)");
+    if (value > 10000) {
+      this.showError(input, error, "Horas muito altas (máx: 10.000)");
       return false;
     }
 
@@ -445,18 +526,108 @@ class SizingCalculator {
     return true;
   }
 
-  validateTaskStart() {
-    const input = document.getElementById("task-start");
-    const error = document.getElementById("task-start-error");
-    const value = parseFloat(input.value);
-
-    if (isNaN(value) || value < 0) {
-      this.showError(input, error, "Início não pode ser negativo");
-      return false;
+  /** Hours typed in the form, or the sum of the subtasks when there are any. */
+  getFormHours() {
+    const subs = this.formSubtasks || [];
+    if (subs.length) {
+      return subs.reduce((sum, s) => sum + (Number(s.hours) || 0), 0);
     }
+    return parseFloat(document.getElementById("task-duration").value);
+  }
 
-    this.clearError(input, error);
-    return true;
+  getFormPriority() {
+    const checked = document.querySelector('input[name="task-priority"]:checked');
+    return checked ? checked.value : "medium";
+  }
+
+  setFormPriority(value) {
+    const radio = document.querySelector(
+      `input[name="task-priority"][value="${value}"]`
+    );
+    if (radio) radio.checked = true;
+  }
+
+  // ---- Subtasks inside the "new task" form ---------------------------------
+
+  addFormSubtask() {
+    this.formSubtasks = this.formSubtasks || [];
+    this.formSubtasks.push({
+      id: this.generateId(),
+      name: "",
+      description: "",
+      hours: 1,
+      done: false,
+    });
+    this.renderFormSubtasks(this.formSubtasks.length - 1);
+    const names = document.querySelectorAll("#form-subtasks .fs-name");
+    if (names.length) names[names.length - 1].focus();
+  }
+
+  removeFormSubtask(index) {
+    const item = document.querySelectorAll("#form-subtasks .fs-item")[index];
+    const remove = () => {
+      this.formSubtasks.splice(index, 1);
+      this.renderFormSubtasks();
+    };
+    if (!item || this.prefersReducedMotion()) return remove();
+    if (item.classList.contains("is-leaving")) return;
+    item.classList.add("is-leaving");
+    setTimeout(remove, 180);
+  }
+
+  updateFormSubtask(index, field, value) {
+    const sub = this.formSubtasks[index];
+    if (!sub) return;
+    sub[field] = field === "hours" ? Math.max(0, parseFloat(value) || 0) : value;
+    this.syncFormHours(); // no re-render: keeps focus in the input
+  }
+
+  /** With subtasks the hours field becomes a read-only automatic sum. */
+  syncFormHours() {
+    const subs = this.formSubtasks || [];
+    const input = document.getElementById("task-duration");
+    const help = document.getElementById("task-duration-help");
+    const total = document.getElementById("form-subtask-total");
+
+    if (subs.length) {
+      const sum = this.getFormHours();
+      input.value = this.formatHours(sum);
+      input.readOnly = true;
+      help.textContent = "Soma automática das subtarefas.";
+      total.textContent = `${this.formatHours(sum)}h`;
+    } else {
+      input.readOnly = false;
+      help.textContent = "Ou divida em subtarefas abaixo.";
+      total.textContent = "";
+    }
+    this.validateTaskForm();
+  }
+
+  renderFormSubtasks(newIndex = -1) {
+    document.getElementById("form-subtasks").innerHTML = (this.formSubtasks || [])
+      .map(
+        (s, i) => `
+        <div class="fs-item ${i === newIndex ? "is-new" : ""}">
+          <div class="fs-row">
+            <input type="text" class="form-control form-control--sm fs-name" maxlength="100"
+              placeholder="Subtarefa ${i + 1}" value="${this.escapeHtml(s.name)}"
+              oninput="app.updateFormSubtask(${i}, 'name', this.value)" />
+            <div class="input-suffix fs-hours">
+              <input type="number" class="form-control form-control--sm" min="0" step="0.5"
+                value="${s.hours}" aria-label="Horas"
+                oninput="app.updateFormSubtask(${i}, 'hours', this.value)" />
+              <span class="input-suffix-text">h</span>
+            </div>
+            <button type="button" class="fs-remove" title="Remover subtarefa" aria-label="Remover"
+              onclick="app.removeFormSubtask(${i})">×</button>
+          </div>
+          <input type="text" class="form-control form-control--sm" placeholder="Descrição (opcional)"
+            value="${this.escapeHtml(s.description)}"
+            oninput="app.updateFormSubtask(${i}, 'description', this.value)" />
+        </div>`
+      )
+      .join("");
+    this.syncFormHours();
   }
 
   showError(input, errorElement, message) {
@@ -469,7 +640,7 @@ class SizingCalculator {
     errorElement.textContent = "";
   }
 
-  addTask() {
+  addTask(keepOpen = false) {
     if (!this.validateTaskForm()) {
       this.showToast(
         "error",
@@ -479,23 +650,48 @@ class SizingCalculator {
       return;
     }
 
-    const task = {
-      id: this.generateId(),
+    const subtasks = (this.formSubtasks || [])
+      .filter((st) => st.name.trim())
+      .map((st) => ({ ...st, name: st.name.trim(), description: st.description.trim() }));
+
+    const fields = {
       name: document.getElementById("task-name").value.trim(),
-      start: parseFloat(document.getElementById("task-start").value) || 0,
-      duration: parseFloat(document.getElementById("task-duration").value),
-      unit: this.currentProject.unit,
+      duration: subtasks.length
+        ? subtasks.reduce((sum, st) => sum + st.hours, 0)
+        : parseFloat(document.getElementById("task-duration").value),
       dependencies: Array.from(
         document.getElementById("task-dependencies").selectedOptions
       )
         .map((o) => o.value)
         .filter((v) => v),
-      priority: document.getElementById("task-priority").value,
+      priority: this.getFormPriority(),
       category:
         document.getElementById("task-category").value.trim() || "Geral",
-      completed: false,
-      color: this.getRandomColor(),
+      description: document.getElementById("task-description").value.trim(),
+      subtasks,
     };
+
+    // Editing keeps everything the form doesn't show (id, color, logic, done flag...)
+    const editingIndex = this.currentProject.tasks.findIndex(
+      (t) => t.id === this.editingTaskId
+    );
+    const editing = editingIndex >= 0;
+    const task = editing
+      ? {
+          ...this.currentProject.tasks[editingIndex],
+          ...fields,
+          completed: subtasks.length
+            ? false
+            : this.currentProject.tasks[editingIndex].completed,
+        }
+      : {
+          id: this.generateId(),
+          start: 0,
+          unit: "hours",
+          completed: false,
+          color: this.getRandomColor(),
+          ...fields,
+        };
 
     // Validate dependencies don't create cycles
     if (!this.validateDependencies(task)) {
@@ -510,18 +706,190 @@ class SizingCalculator {
     // Recalculate start time based on dependencies
     task.start = this.calculateTaskStart(task);
 
-    this.currentProject.tasks.push(task);
+    if (editing) {
+      this.currentProject.tasks[editingIndex] = task;
+    } else {
+      this.currentProject.tasks.push(task);
+    }
+    this.lastAddedId = task.id;
     this.saveState();
     this.updateUI();
     this.updateChart();
-    this.resetForm();
     this.autoSave();
 
     this.showToast(
       "success",
-      "Tarefa Adicionada",
-      `"${task.name}" foi adicionada com sucesso!`
+      editing ? "Tarefa Atualizada" : "Tarefa Adicionada",
+      `"${this.escapeHtml(task.name)}" ${editing ? "foi atualizada" : "foi adicionada"} com sucesso!`
     );
+
+    if (keepOpen && !editing) {
+      this.resetForm();
+      this.formSnapshot = this.getFormState();
+      document.getElementById("task-name").focus();
+    } else {
+      this.closeDrawer();
+    }
+  }
+
+  // ---- Drawer ---------------------------------------------------------------
+
+  prefersReducedMotion() {
+    return (
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
+  }
+
+  isDrawerOpen() {
+    return document.getElementById("task-drawer").classList.contains("is-open");
+  }
+
+  /** Open the drawer empty (new task) or filled with an existing task. */
+  openDrawer(taskId = null) {
+    if (this.isDrawerOpen()) return;
+    const task = taskId
+      ? this.currentProject.tasks.find((t) => t.id === taskId)
+      : null;
+
+    this.closeMenus();
+    this.drawerOpener = document.activeElement;
+    this.editingTaskId = task ? task.id : null;
+
+    this.showFormTab();
+    this.updateDependenciesSelect();
+    if (task) this.loadTaskIntoForm(task);
+    else this.resetForm();
+    this.updateDrawerMode();
+    this.formSnapshot = this.getFormState();
+
+    document.getElementById("task-drawer").classList.add("is-open");
+    document.getElementById("task-drawer").setAttribute("aria-hidden", "false");
+    document.getElementById("drawer-backdrop").classList.add("is-open");
+    document.body.classList.add("drawer-open");
+
+    const name = document.getElementById("task-name");
+    requestAnimationFrame(() => name.focus({ preventScroll: true }));
+  }
+
+  closeDrawer() {
+    const drawer = document.getElementById("task-drawer");
+    if (!drawer.classList.contains("is-open")) return;
+
+    drawer.classList.remove("is-open");
+    drawer.setAttribute("aria-hidden", "true");
+    document.getElementById("drawer-backdrop").classList.remove("is-open");
+    document.body.classList.remove("drawer-open");
+    this.editingTaskId = null;
+
+    const opener = this.drawerOpener;
+    this.drawerOpener = null;
+    if (opener && document.contains(opener) && opener.focus) opener.focus();
+  }
+
+  /** Esc / backdrop / X: refuse to throw away typed data by accident. */
+  requestCloseDrawer() {
+    const dirty =
+      !document.getElementById("task-drawer").classList.contains("drawer--dsl") &&
+      this.getFormState() !== this.formSnapshot;
+    if (!dirty) return this.closeDrawer();
+
+    const drawer = document.getElementById("task-drawer");
+    drawer.classList.remove("drawer--shake");
+    void drawer.offsetWidth; // restart the animation
+    drawer.classList.add("drawer--shake");
+    setTimeout(() => drawer.classList.remove("drawer--shake"), 450);
+    this.showToast(
+      "info",
+      "Alterações não salvas",
+      "Salve a tarefa ou use “Cancelar” para descartar."
+    );
+  }
+
+  trapFocus(e) {
+    if (e.key !== "Tab") return;
+    const focusable = Array.from(
+      document
+        .getElementById("task-drawer")
+        .querySelectorAll(
+          'button, [href], input, select, textarea, summary, [tabindex]:not([tabindex="-1"])'
+        )
+    ).filter((el) => !el.disabled && el.offsetParent !== null);
+    if (!focusable.length) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  showFormTab() {
+    document.getElementById("form-container").classList.remove("hidden");
+    document.getElementById("dsl-container").classList.add("hidden");
+    document.getElementById("form-mode-btn").classList.add("active");
+    document.getElementById("dsl-mode-btn").classList.remove("active");
+    document.getElementById("task-drawer").classList.remove("drawer--dsl");
+  }
+
+  updateDrawerMode() {
+    const editing = !!this.editingTaskId;
+    document.getElementById("form-title").textContent = editing
+      ? "Editando tarefa"
+      : "Nova tarefa";
+    document.getElementById("add-task-label").textContent = editing
+      ? "Salvar alterações"
+      : "Adicionar tarefa";
+    document
+      .getElementById("task-drawer")
+      .classList.toggle("drawer--editing", editing);
+  }
+
+  getFormState() {
+    return JSON.stringify({
+      n: document.getElementById("task-name").value,
+      d: document.getElementById("task-description").value,
+      h: document.getElementById("task-duration").value,
+      p: this.getFormPriority(),
+      c: document.getElementById("task-category").value,
+      s: this.formSubtasks || [],
+      dep: Array.from(
+        document.getElementById("task-dependencies").selectedOptions
+      ).map((o) => o.value),
+    });
+  }
+
+  loadTaskIntoForm(task) {
+    document.getElementById("task-name").value = task.name;
+    document.getElementById("task-description").value = task.description || "";
+    document.getElementById("task-duration").value = task.duration;
+    this.setFormPriority(task.priority);
+    document.getElementById("task-category").value = task.category;
+    this.formSubtasks = (task.subtasks || []).map((st) => ({ ...st }));
+    this.renderFormSubtasks();
+
+    const select = document.getElementById("task-dependencies");
+    Array.from(select.options).forEach((option) => {
+      option.selected = (task.dependencies || []).includes(option.value);
+    });
+    const hasDeps = (task.dependencies || []).length > 0;
+    select.closest("details").open = hasDeps;
+
+    document.querySelectorAll(".error-message").forEach((el) => (el.textContent = ""));
+    this.validateTaskForm();
+  }
+
+  updateDrawerSummary() {
+    const subs = (this.formSubtasks || []).length;
+    const hours = this.getFormHours();
+    const label = `${this.formatHours(isNaN(hours) ? 0 : hours)}h`;
+    document.getElementById("drawer-summary").textContent = subs
+      ? `${label} · ${subs} subtarefa${subs > 1 ? "s" : ""}`
+      : label;
   }
 
   validateDependencies(newTask) {
@@ -540,7 +908,7 @@ class SizingCalculator {
         taskId === newTask.id
           ? newTask
           : this.currentProject.tasks.find((t) => t.id === taskId);
-      if (task) {
+      if (task && task.dependencies) {
         for (const depId of task.dependencies) {
           if (hasCycle(depId)) return true;
         }
@@ -554,7 +922,7 @@ class SizingCalculator {
   }
 
   calculateTaskStart(task) {
-    if (!task.dependencies.length) {
+    if (!task.dependencies || !task.dependencies.length) {
       return task.start || 0;
     }
 
@@ -578,11 +946,13 @@ class SizingCalculator {
 
   resetForm() {
     document.getElementById("task-name").value = "";
-    document.getElementById("task-start").value = "0";
+    document.getElementById("task-description").value = "";
     document.getElementById("task-duration").value = "1";
-    document.getElementById("task-priority").value = "medium";
+    this.setFormPriority("medium");
     document.getElementById("task-category").value = "";
     document.getElementById("task-dependencies").selectedIndex = -1;
+    this.formSubtasks = [];
+    this.renderFormSubtasks();
 
     // Clear errors
     document
@@ -593,6 +963,7 @@ class SizingCalculator {
       .forEach((el) => el.classList.remove("error"));
 
     document.getElementById("add-task-btn").disabled = true;
+    document.getElementById("add-another-btn").disabled = true;
   }
 
   updateProjectStartDateField() {
@@ -603,74 +974,108 @@ class SizingCalculator {
   }
 
   updateUI() {
+    this.recalculateSchedule();
     this.updateOverview();
     this.updateTasksList();
     this.updateDependenciesSelect();
-    this.updateUnitLabels();
     this.updateUndoRedoButtons();
+    this.updateDSLEditor();
 
     // ✨ NOVO: Atualizar campo de data na UI
     this.updateProjectStartDateField();
   }
 
-  updateOverview() {
-    const totalDuration = this.currentProject.tasks.reduce(
-      (sum, task) => sum + task.duration,
-      0
-    );
-    const totalTasks = this.currentProject.tasks.length;
+  /**
+   * Everything is derived from the checklist: a task with subtasks takes the
+   * sum of their hours, and a task starts when its dependencies end (or right
+   * after the previous task when it has none).
+   */
+  recalculateSchedule() {
+    const tasks = this.currentProject.tasks;
 
-    document.getElementById("total-duration").textContent =
-      totalDuration.toFixed(1);
-    document.getElementById("total-tasks").textContent = totalTasks;
-
-    document.getElementById("duration-unit").textContent =
-      this.currentProject.unit === "days" ? "dias" : "horas";
-
-    // ✅ CORRETO: Calcular com dias úteis
-    if (totalTasks > 0) {
-      const maxEnd = Math.max(
-        ...this.currentProject.tasks.map((task) => task.start + task.duration)
-      );
-
-      // ✨ NOVO: Parsear data corretamente para evitar erro de timezone
-      const parseProjectDate = (dateString) => {
-        if (!dateString) return new Date();
-
-        // Formato esperado: "2025-12-08"
-        const [year, month, day] = dateString.split("-");
-        // Criar sem timezone (evita UTC)
-        return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-      };
-
-      const projectStartDate = parseProjectDate(this.currentProject.startDate);
-
-      let completionDate;
-
-      if (this.currentProject.unit === "days") {
-        // Se em dias, use o ConfigManager para respeitar dias úteis
-        // ✅ NOVO: Usar cálculo de dias úteis
-        completionDate = configManager.calculateEndDate(
-          projectStartDate,
-          Math.ceil(maxEnd)
-        );
-      } else {
-        // Se em HORAS: Converter para dias úteis primeiro
-        // ✅ NOVO: Converter horas para dias úteis
-        const hoursPerDay = configManager.getHoursPerDay();
-        const daysNeeded = Math.ceil(maxEnd / hoursPerDay);
-
-        completionDate = configManager.calculateEndDate(
-          projectStartDate,
-          daysNeeded
-        );
+    tasks.forEach((task) => {
+      if (task.subtasks && task.subtasks.length) {
+        const sum = this.getTaskHours(task);
+        if (sum > 0) task.duration = sum;
       }
+    });
 
-      document.getElementById("completion-date").textContent =
-        calculateUtils.formatDate(completionDate);
-    } else {
-      document.getElementById("completion-date").textContent = "-";
+    for (let pass = 0; pass < tasks.length; pass++) {
+      let changed = false;
+      tasks.forEach((task, i) => {
+        let start;
+        if (task.dependencies && task.dependencies.length) {
+          start = this.calculateTaskStart({ ...task, start: 0 });
+        } else {
+          const prev = tasks[i - 1];
+          start = prev ? prev.start + prev.duration : 0;
+        }
+        if (task.start !== start) {
+          task.start = start;
+          changed = true;
+        }
+      });
+      if (!changed) break;
     }
+  }
+
+  /** Count the number up/down to its new value (instant on first paint). */
+  animateStat(id, value, format) {
+    const el = document.getElementById(id);
+    const from = el._stat;
+    el._stat = value;
+    if (el._raf) cancelAnimationFrame(el._raf);
+
+    if (from == null || from === value || this.prefersReducedMotion()) {
+      el.textContent = format(value);
+      return;
+    }
+
+    const start = performance.now();
+    const duration = 450;
+    const step = (now) => {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      el.textContent = format(from + (value - from) * eased);
+      if (t < 1) el._raf = requestAnimationFrame(step);
+    };
+    el._raf = requestAnimationFrame(step);
+  }
+
+  updateOverview() {
+    const tasks = this.currentProject.tasks;
+    const hoursPerDay = configManager.getHoursPerDay();
+    const totalHours = this.getTotalHours();
+    const doneHours = this.getDoneHours();
+    const percent = totalHours > 0 ? (doneHours / totalHours) * 100 : 0;
+
+    const round1 = (v) => this.formatHours(Math.round(v * 10) / 10);
+    this.animateStat("total-duration", totalHours / hoursPerDay, round1);
+    document.getElementById("duration-unit").textContent =
+      `dias úteis (${hoursPerDay}h/dia)`;
+    this.animateStat("total-tasks", tasks.length, (v) => String(Math.round(v)));
+    this.animateStat("total-hours", totalHours, round1);
+    this.animateStat("total-progress", percent, (v) => `${Math.round(v)}%`);
+    document.getElementById("progress-label").textContent =
+      `${this.formatHours(doneHours)}h de ${this.formatHours(totalHours)}h`;
+    document.getElementById("total-progress-bar").style.width = `${percent}%`;
+
+    if (tasks.length === 0) {
+      document.getElementById("completion-date").textContent = "-";
+      return;
+    }
+
+    const maxEnd = Math.max(...tasks.map((t) => t.start + t.duration));
+    const [year, month, day] = (this.currentProject.startDate || "").split("-");
+    const projectStartDate = year
+      ? new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
+      : new Date();
+    const completionDate = configManager.calculateEndDate(
+      projectStartDate,
+      Math.ceil(maxEnd / hoursPerDay)
+    );
+    document.getElementById("completion-date").textContent =
+      calculateUtils.formatDate(completionDate);
   }
 
   updateTasksList() {
@@ -706,40 +1111,216 @@ class SizingCalculator {
       );
     }
 
+    this.expandedTasks = this.expandedTasks || new Set();
+    const e = (v) => this.escapeHtml(v);
+
+    const opening = this.animateOpenId;
+    this.animateOpenId = null;
+    const added = this.lastAddedId;
+    this.lastAddedId = null;
+
     tbody.innerHTML = filteredTasks
-      .map(
-        (task) => `
-            <tr data-task-id="${task.id}">
+      .map((task) => {
+        const open = this.expandedTasks.has(task.id);
+        const justOpening = open && task.id === opening;
+        const subCount = (task.subtasks || []).length;
+        const main = `
+            <tr class="task-row ${open && !justOpening ? "is-open" : ""} ${task.id === added ? "row-new" : ""}" data-task-id="${task.id}" onclick="app.toggleExpand('${task.id}')">
                 <td>
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <div style="width: 12px; height: 12px; background: ${
-                          task.color
-                        }; border-radius: 50%;"></div>
-                        <strong>${task.name}</strong>
+                    <div class="task-name-cell">
+                        <span class="expand-chevron" aria-hidden="true">▸</span>
+                        <div class="task-color-dot" style="background: ${task.color};"></div>
+                        <strong>${e(task.name)}</strong>
+                        ${subCount ? `<span class="sub-count">${subCount} sub</span>` : ""}
                     </div>
                 </td>
-                <td>${task.start} ${this.getUnitLabel()}</td>
-                <td>${task.duration} ${this.getUnitLabel()}</td>
-                <td><span class="priority-badge priority-badge--${
-                  task.priority
-                }">${this.getPriorityLabel(task.priority)}</span></td>
-                <td>${task.category}</td>
-                <td>${this.getDependenciesText(task)}</td>
-                <td>
-                    <button class="btn btn--sm btn--secondary" onclick="app.editTask('${
-                      task.id
-                    }')" title="Editar">✏️</button>
-                    <button class="btn btn--sm btn--secondary" onclick="app.duplicateTask('${
-                      task.id
-                    }')" title="Duplicar">📋</button>
-                    <button class="btn btn--sm btn--outline" onclick="app.removeTask('${
-                      task.id
-                    }')" title="Remover">🗑️</button>
+                <td>${this.formatHours(this.getTaskHours(task))}h</td>
+                <td>${this.renderTaskProgress(task)}</td>
+                <td><span class="priority-badge priority-badge--${task.priority}">${this.getPriorityLabel(task.priority)}</span></td>
+                <td>${e(task.category)}</td>
+                <td>${e(this.getDependenciesText(task))}</td>
+                <td onclick="event.stopPropagation()">
+                    <div class="task-actions">
+                        <button class="btn btn--sm btn--secondary" onclick="app.openDrawer('${task.id}')" title="Editar tarefa">Editar</button>
+                        <button class="btn btn--sm btn--ghost btn--icon row-more" onclick="app.openRowMenu(event, '${task.id}')" aria-label="Mais ações" aria-haspopup="true" title="Mais ações">⋯</button>
+                    </div>
                 </td>
-            </tr>
-        `
-      )
+            </tr>`;
+        return open ? main + this.renderTaskDetail(task, justOpening) : main;
+      })
       .join("");
+
+    this.updateExpandAllLabel();
+
+    if (opening) {
+      // Two frames so the browser paints the collapsed state first
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          tbody
+            .querySelectorAll(".task-detail-row.is-closed")
+            .forEach((r) => r.classList.remove("is-closed"));
+          const row = tbody.querySelector(`.task-row[data-task-id="${opening}"]`);
+          if (row) row.classList.add("is-open");
+        })
+      );
+    }
+
+    const fresh = tbody.querySelector(".row-new");
+    if (fresh && fresh.scrollIntoView) {
+      fresh.scrollIntoView({
+        block: "nearest",
+        behavior: this.prefersReducedMotion() ? "auto" : "smooth",
+      });
+    }
+  }
+
+  // ---- Row actions menu ----------------------------------------------------
+
+  openRowMenu(event, taskId) {
+    event.stopPropagation();
+    const menu = document.getElementById("row-menu");
+    if (menu.classList.contains("is-open") && this.rowMenuTaskId === taskId) {
+      return this.closeRowMenu();
+    }
+    this.closeMenus();
+    this.rowMenuTaskId = taskId;
+
+    const act = (call) => `app.closeRowMenu(); ${call}`;
+    menu.innerHTML = `
+      <button role="menuitem" onclick="${act(`app.showChecklistModal('${taskId}')`)}">Subtarefas (detalhado)</button>
+      <button role="menuitem" onclick="${act(`app.showLogicModal('${taskId}')`)}">Lógica</button>
+      <button role="menuitem" onclick="${act(`app.duplicateTask('${taskId}')`)}">Copiar</button>
+      <hr />
+      <button role="menuitem" class="is-danger" onclick="${act(`app.removeTask('${taskId}')`)}">Remover</button>`;
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    menu.classList.add("is-open");
+    const width = menu.offsetWidth || 200;
+    const height = menu.offsetHeight || 150;
+    const flip = rect.bottom + height + 8 > window.innerHeight;
+    menu.style.top = `${flip ? rect.top - height - 4 : rect.bottom + 4}px`;
+    menu.style.left = `${Math.max(8, rect.right - width)}px`;
+    menu.classList.toggle("is-flipped", flip);
+  }
+
+  closeRowMenu() {
+    const menu = document.getElementById("row-menu");
+    const was = menu.classList.contains("is-open");
+    menu.classList.remove("is-open");
+    this.rowMenuTaskId = null;
+    return was;
+  }
+
+  /** Close every popover; true when something was actually open. */
+  closeMenus() {
+    const tpl = document.getElementById("templates-menu");
+    const tplWas = tpl.classList.contains("is-open");
+    tpl.classList.remove("is-open");
+    document.getElementById("templates-btn").setAttribute("aria-expanded", "false");
+    const rowWas = this.closeRowMenu();
+    return tplWas || rowWas;
+  }
+
+  renderTaskDetail(task, closed = false) {
+    const e = (v) => this.escapeHtml(v);
+    const subs = task.subtasks || [];
+
+    const body = subs.length
+      ? `<ul class="detail-subtasks">${subs
+          .map(
+            (s) => `
+          <li class="${s.done ? "is-done" : ""}">
+            <label class="detail-check">
+              <input type="checkbox" ${s.done ? "checked" : ""}
+                onchange="app.toggleSubtask('${task.id}', '${s.id}', this.checked)" />
+              <span class="detail-sub-name">${e(s.name)}</span>
+            </label>
+            <span class="detail-sub-desc">${e(s.description)}</span>
+            <span class="detail-sub-hours">${this.formatHours(Number(s.hours) || 0)}h</span>
+          </li>`
+          )
+          .join("")}</ul>`
+      : `<label class="detail-check detail-whole">
+           <input type="checkbox" ${task.completed ? "checked" : ""}
+             onchange="app.toggleTaskCompleted('${task.id}', this.checked)" />
+           <span>Tarefa concluída</span>
+           <small>(sem subtarefas — edite a tarefa para dividir)</small>
+         </label>`;
+
+    return `
+      <tr class="task-detail-row ${closed ? "is-closed" : ""}" data-for="${task.id}">
+        <td colspan="7">
+          <div class="task-detail-wrap">
+            <div class="task-detail">
+              <div class="task-detail-inner">
+                ${task.description ? `<p class="detail-desc">${e(task.description)}</p>` : ""}
+                ${body}
+              </div>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+  }
+
+  toggleExpand(taskId) {
+    this.expandedTasks = this.expandedTasks || new Set();
+
+    if (!this.expandedTasks.has(taskId)) {
+      this.expandedTasks.add(taskId);
+      this.animateOpenId = this.prefersReducedMotion() ? null : taskId;
+      this.updateTasksList();
+      return;
+    }
+
+    this.expandedTasks.delete(taskId);
+    const tbody = document.getElementById("tasks-tbody");
+    const detail = tbody.querySelector(`.task-detail-row[data-for="${taskId}"]`);
+    if (!detail || this.prefersReducedMotion()) return this.updateTasksList();
+
+    detail.classList.add("is-closing");
+    const row = tbody.querySelector(`.task-row[data-task-id="${taskId}"]`);
+    if (row) row.classList.remove("is-open");
+    setTimeout(() => this.updateTasksList(), 260);
+  }
+
+  toggleExpandAll() {
+    this.expandedTasks = this.expandedTasks || new Set();
+    const tasks = this.currentProject.tasks;
+    const allOpen = tasks.every((t) => this.expandedTasks.has(t.id));
+    this.expandedTasks = allOpen ? new Set() : new Set(tasks.map((t) => t.id));
+    this.updateTasksList();
+  }
+
+  updateExpandAllLabel() {
+    const tasks = this.currentProject.tasks;
+    const allOpen =
+      tasks.length > 0 && tasks.every((t) => this.expandedTasks.has(t.id));
+    document.querySelector("#toggle-expand-btn span").textContent = allOpen
+      ? "Recolher tudo"
+      : "Expandir tudo";
+  }
+
+  /** Ticking an item in the expanded row updates progress everywhere. */
+  toggleSubtask(taskId, subId, done) {
+    const task = this.currentProject.tasks.find((t) => t.id === taskId);
+    const sub = task && task.subtasks.find((s) => s.id === subId);
+    if (!sub) return;
+    sub.done = done;
+    this.afterChecklistChange();
+  }
+
+  toggleTaskCompleted(taskId, done) {
+    const task = this.currentProject.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    task.completed = done;
+    this.afterChecklistChange();
+  }
+
+  afterChecklistChange() {
+    this.saveState();
+    this.updateUI();
+    this.updateChart();
+    this.autoSave();
   }
 
   updateDependenciesSelect() {
@@ -748,14 +1329,20 @@ class SizingCalculator {
       (o) => o.value
     );
 
-    if (this.currentProject.tasks.length === 0) {
+    const candidates = this.currentProject.tasks.filter(
+      (t) => t.id !== this.editingTaskId
+    );
+    if (candidates.length === 0) {
       select.innerHTML =
         '<option value="" disabled>Nenhuma tarefa disponível</option>';
       return;
     }
 
-    select.innerHTML = this.currentProject.tasks
-      .map((task) => `<option value="${task.id}">${task.name}</option>`)
+    select.innerHTML = candidates
+      .map(
+        (task) =>
+          `<option value="${task.id}">${this.escapeHtml(task.name)}</option>`
+      )
       .join("");
 
     // Restore previous selections that still exist
@@ -763,17 +1350,6 @@ class SizingCalculator {
       const option = select.querySelector(`option[value="${value}"]`);
       if (option) option.selected = true;
     });
-  }
-
-  updateUnitLabels() {
-    const unit = this.currentProject.unit;
-    const startGroup = document.getElementById("task-start-group");
-
-    if (unit === "hours") {
-      startGroup.style.display = "none";
-    } else {
-      startGroup.style.display = "block";
-    }
   }
 
   updateUndoRedoButtons() {
@@ -789,7 +1365,7 @@ class SizingCalculator {
   }
 
   getUnitLabel() {
-    return this.currentProject.unit === "days" ? "dias" : "horas";
+    return "h";
   }
 
   getPriorityLabel(priority) {
@@ -800,7 +1376,7 @@ class SizingCalculator {
   }
 
   getDependenciesText(task) {
-    if (!task.dependencies.length) return "-";
+    if (!task.dependencies || !task.dependencies.length) return "-";
 
     return task.dependencies
       .map((depId) => {
@@ -815,42 +1391,7 @@ class SizingCalculator {
   }
 
   editTask(taskId) {
-    const task = this.currentProject.tasks.find((t) => t.id === taskId);
-    if (!task) return;
-
-    // Fill form with task data
-    document.getElementById("task-name").value = task.name;
-    document.getElementById("task-start").value = task.start;
-    document.getElementById("task-duration").value = task.duration;
-    document.getElementById("task-priority").value = task.priority;
-    document.getElementById("task-category").value = task.category;
-
-    // Select dependencies
-    const dependenciesSelect = document.getElementById("task-dependencies");
-    Array.from(dependenciesSelect.options).forEach((option) => {
-      option.selected = task.dependencies.includes(option.value);
-    });
-
-    // Remove current task and change button
-    this.removeTask(taskId, false);
-
-    const addBtn = document.getElementById("add-task-btn");
-    addBtn.textContent = "✏️ Atualizar Tarefa";
-    addBtn.disabled = false;
-
-    // Override the click handler temporarily
-    const originalHandler = addBtn.onclick;
-    addBtn.onclick = () => {
-      this.addTask();
-      addBtn.textContent = "➕ Adicionar Tarefa";
-      addBtn.onclick = originalHandler;
-    };
-
-    this.showToast(
-      "info",
-      "Edição",
-      'Tarefa carregada para edição. Faça as alterações e clique em "Atualizar".'
-    );
+    this.openDrawer(taskId);
   }
 
   duplicateTask(taskId) {
@@ -863,9 +1404,16 @@ class SizingCalculator {
       name: `${task.name} (Cópia)`,
       start: task.start + task.duration,
       dependencies: [], // Remove dependencies for duplicated task
+      completed: false,
+      subtasks: (task.subtasks || []).map((s) => ({
+        ...s,
+        id: this.generateId(),
+        done: false,
+      })),
     };
 
     this.currentProject.tasks.push(duplicatedTask);
+    this.lastAddedId = duplicatedTask.id;
     this.saveState();
     this.updateUI();
     this.updateChart();
@@ -924,16 +1472,18 @@ class SizingCalculator {
   }
 
   populateTemplates() {
-    const container = document.getElementById("template-buttons");
-    container.innerHTML = this.sampleData.templates
+    const html = this.sampleData.templates
       .map(
         (template) => `
-            <button class="template-btn" onclick="app.applyTemplate('${template.name}')" title="Aplicar template ${template.name}">
-                📋 ${template.name}
+            <button class="template-btn" role="menuitem" onclick="app.applyTemplate('${template.name}')" title="Aplicar template ${template.name}">
+                ${template.name}
+                <small>${template.tasks.length} tarefas</small>
             </button>
         `
       )
       .join("");
+    document.getElementById("template-buttons").innerHTML = html;
+    document.getElementById("empty-templates").innerHTML = html;
   }
 
   applyTemplate(templateName) {
@@ -954,8 +1504,10 @@ class SizingCalculator {
             id: this.generateId(),
             name: taskTemplate.name,
             start: currentStart,
-            duration: taskTemplate.duration,
-            unit: this.currentProject.unit,
+            duration: taskTemplate.duration * configManager.getHoursPerDay(),
+            unit: "hours",
+            description: "",
+            subtasks: [],
             dependencies:
               index > 0 ? [this.currentProject.tasks[index - 1].id] : [],
             priority: taskTemplate.priority,
@@ -988,6 +1540,85 @@ class SizingCalculator {
     );
   }
 
+  applyDSL() {
+    const code = document.getElementById("dsl-editor").value;
+    if (!code.trim()) return;
+
+    try {
+      const tasks = this.dslParser.parse(code);
+      if (tasks.length === 0) {
+        this.showToast("warning", "DSL Vazia", "Nenhuma tarefa válida encontrada no código.");
+        return;
+      }
+
+      // Confirm before replacing all tasks
+      this.confirmAction(
+        "Aplicar Código",
+        `Isso substituirá as ${this.currentProject.tasks.length} tarefas atuais por ${tasks.length} novas tarefas. Continuar?`,
+        () => {
+          // Process tasks to add IDs and colors, and resolve "after" dependencies
+          // Checklist data isn't expressed in the DSL: carry it over by task name
+          const previous = new Map(
+            this.currentProject.tasks.map((t) => [t.name.toLowerCase(), t])
+          );
+          const processedTasks = tasks.map(task => {
+            const old = previous.get(task.name.toLowerCase());
+            return {
+              ...task,
+              id: this.generateId(),
+              unit: "hours",
+              completed: old ? !!old.completed : false,
+              description: old ? old.description || "" : "",
+              subtasks: old ? old.subtasks || [] : [],
+              color: this.getRandomColor(),
+              dependencies: []
+            };
+          });
+
+          // Resolve dependencies based on names
+          processedTasks.forEach(task => {
+            if (task.afterTaskName) {
+              const depTask = processedTasks.find(t => t.name.toLowerCase() === task.afterTaskName.toLowerCase());
+              if (depTask) {
+                task.dependencies = [depTask.id];
+              }
+              delete task.afterTaskName;
+            }
+          });
+
+          this.currentProject.tasks = processedTasks;
+          
+          // Recalculate starts based on dependencies
+          this.currentProject.tasks.forEach(task => {
+            task.start = this.calculateTaskStart(task);
+          });
+
+          this.saveState();
+          this.updateUI();
+          this.updateChart();
+          this.autoSave();
+
+          this.showToast(
+            "success",
+            "Código Aplicado",
+            `${tasks.length} tarefas foram criadas a partir do código.`
+          );
+        }
+      );
+    } catch (error) {
+      console.error("DSL Parsing error:", error);
+      this.showToast("error", "Erro no Código", "Não foi possível processar o código. Verifique a sintaxe.");
+    }
+  }
+
+  updateDSLEditor() {
+    const editor = document.getElementById("dsl-editor");
+    // Only update if not currently focused to avoid interrupting user typing
+    if (document.activeElement !== editor) {
+      editor.value = this.dslParser.generate(this.currentProject.tasks);
+    }
+  }
+
   initChart() {
     const ctx = document.getElementById("timeline-chart").getContext("2d");
 
@@ -1005,7 +1636,7 @@ class SizingCalculator {
           x: {
             title: {
               display: true,
-              text: "Tempo",
+              text: "Horas",
             },
             beginAtZero: true,
           },
@@ -1121,7 +1752,6 @@ class SizingCalculator {
       this.currentProject.name === "Novo Projeto"
         ? ""
         : this.currentProject.name;
-    document.getElementById("task-unit").value = this.currentProject.unit;
 
     this.showToast("info", "Desfeito", "Ação desfeita com sucesso!");
   }
@@ -1142,7 +1772,6 @@ class SizingCalculator {
       this.currentProject.name === "Novo Projeto"
         ? ""
         : this.currentProject.name;
-    document.getElementById("task-unit").value = this.currentProject.unit;
 
     this.showToast("info", "Refeito", "Ação refeita com sucesso!");
   }
@@ -1174,13 +1803,290 @@ class SizingCalculator {
     }
   }
 
+  normalizeProject(project) {
+    if (!project) return project;
+
+    // Ensure basic project properties
+    if (!project.tasks) project.tasks = [];
+    if (project.unit !== "hours") {
+      // Older projects were in days: the app is hours-only now
+      const hoursPerDay = configManager.getHoursPerDay();
+      project.tasks.forEach((task) => {
+        task.duration = (Number(task.duration) || 0) * hoursPerDay;
+        task.start = (Number(task.start) || 0) * hoursPerDay;
+        task.unit = "hours";
+      });
+      project.unit = "hours";
+    }
+    if (!project.settings) project.settings = { theme: "light", autoSave: true };
+    if (!project.startDate) {
+      project.startDate = new Date().toISOString().split("T")[0];
+    }
+
+    // Ensure all tasks have dependencies and logic property
+    project.tasks.forEach((task) => {
+      if (!task.dependencies) {
+        task.dependencies = [];
+      }
+      if (task.logic === undefined) {
+        task.logic = "";
+      }
+      if (task.description === undefined) {
+        task.description = "";
+      }
+      if (!Array.isArray(task.subtasks)) {
+        task.subtasks = [];
+      }
+    });
+
+    return project;
+  }
+
+  // ---- Hours & progress ----------------------------------------------------
+
+  escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  formatHours(hours) {
+    return String(Math.round(hours * 100) / 100);
+  }
+
+  /** Duration of a task without subtasks (the project is always in hours). */
+  getDurationInHours(task) {
+    return task.duration;
+  }
+
+  /** Subtasks (when present) drive the hours; otherwise the task duration does. */
+  getTaskHours(task) {
+    if (task.subtasks && task.subtasks.length) {
+      return task.subtasks.reduce((sum, s) => sum + (Number(s.hours) || 0), 0);
+    }
+    return this.getDurationInHours(task);
+  }
+
+  getTaskDoneHours(task) {
+    if (task.subtasks && task.subtasks.length) {
+      return task.subtasks
+        .filter((s) => s.done)
+        .reduce((sum, s) => sum + (Number(s.hours) || 0), 0);
+    }
+    return task.completed ? this.getDurationInHours(task) : 0;
+  }
+
+  getTaskProgress(task) {
+    const subs = task.subtasks || [];
+    const total = this.getTaskHours(task);
+    const doneCount = subs.filter((s) => s.done).length;
+    let percent;
+    if (total > 0) percent = (this.getTaskDoneHours(task) / total) * 100;
+    else if (subs.length) percent = (doneCount / subs.length) * 100;
+    else percent = task.completed ? 100 : 0;
+    return { percent, doneCount, count: subs.length };
+  }
+
+  getTotalHours() {
+    return this.currentProject.tasks.reduce(
+      (sum, t) => sum + this.getTaskHours(t),
+      0
+    );
+  }
+
+  getDoneHours() {
+    return this.currentProject.tasks.reduce(
+      (sum, t) => sum + this.getTaskDoneHours(t),
+      0
+    );
+  }
+
+  renderTaskProgress(task) {
+    const { percent, doneCount, count } = this.getTaskProgress(task);
+    const label = count
+      ? `${doneCount}/${count} · ${Math.round(percent)}%`
+      : `${Math.round(percent)}%`;
+    return `<div class="progress-cell">
+        <div class="progress-bar"><div class="progress-bar-fill" style="width:${percent}%"></div></div>
+        <span>${label}</span>
+      </div>`;
+  }
+
+  // ---- Checklist modal -----------------------------------------------------
+
+  showChecklistModal(taskId) {
+    const task = this.currentProject.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    this.checklistDraft = {
+      taskId,
+      description: task.description || "",
+      completed: !!task.completed,
+      subtasks: (task.subtasks || []).map((s) => ({ ...s })),
+    };
+
+    document.getElementById(
+      "checklist-modal-title"
+    ).textContent = `Checklist: ${task.name}`;
+    document.getElementById("checklist-description").value =
+      this.checklistDraft.description;
+    document.getElementById("checklist-completed").checked =
+      this.checklistDraft.completed;
+    document.getElementById("checklist-completed").onchange = (e) => {
+      this.checklistDraft.completed = e.target.checked;
+      this.renderChecklistSummary();
+    };
+    document.getElementById("checklist-description").oninput = (e) => {
+      this.checklistDraft.description = e.target.value;
+    };
+    document.getElementById("checklist-modal-save").onclick = () =>
+      this.saveChecklist();
+
+    this.renderChecklist();
+    document.getElementById("checklist-modal").classList.remove("hidden");
+  }
+
+  hideChecklistModal() {
+    document.getElementById("checklist-modal").classList.add("hidden");
+    this.checklistDraft = null;
+  }
+
+  renderChecklist() {
+    const draft = this.checklistDraft;
+    if (!draft) return;
+
+    document.getElementById("checklist-tbody").innerHTML = draft.subtasks
+      .map(
+        (s, i) => `
+        <tr>
+          <td class="col-ok"><input type="checkbox" ${s.done ? "checked" : ""}
+              onchange="app.updateSubtask(${i}, 'done', this.checked)" aria-label="OK" /></td>
+          <td class="col-name"><input type="text" class="form-control form-control--sm" maxlength="100"
+              value="${this.escapeHtml(s.name)}" placeholder="Nome da subtarefa"
+              oninput="app.updateSubtask(${i}, 'name', this.value)" /></td>
+          <td class="col-desc"><textarea class="form-control form-control--sm" rows="1"
+              placeholder="Descrição detalhada"
+              oninput="app.updateSubtask(${i}, 'description', this.value)">${this.escapeHtml(s.description)}</textarea></td>
+          <td class="col-hours"><input type="number" class="form-control form-control--sm" min="0" step="0.5"
+              value="${s.hours}" oninput="app.updateSubtask(${i}, 'hours', this.value)" /></td>
+          <td class="col-del"><button class="btn btn--sm btn--outline" title="Remover"
+              onclick="app.removeSubtaskRow(${i})">×</button></td>
+        </tr>`
+      )
+      .join("");
+
+    const hasSubtasks = draft.subtasks.length > 0;
+    document
+      .getElementById("checklist-empty-hint")
+      .classList.toggle("hidden", hasSubtasks);
+    document
+      .getElementById("checklist-whole-wrap")
+      .classList.toggle("hidden", hasSubtasks);
+    this.renderChecklistSummary();
+  }
+
+  renderChecklistSummary() {
+    const draft = this.checklistDraft;
+    if (!draft) return;
+
+    const task = this.currentProject.tasks.find((t) => t.id === draft.taskId);
+    const probe = { ...task, subtasks: draft.subtasks, completed: draft.completed };
+    const total = this.getTaskHours(probe);
+    const { percent, doneCount, count } = this.getTaskProgress(probe);
+
+    document.getElementById("checklist-summary").innerHTML = `
+      <span><strong>${this.formatHours(total)}h</strong> no total</span>
+      <span><strong>${this.formatHours(this.getTaskDoneHours(probe))}h</strong> concluídas</span>
+      <span><strong>${count ? `${doneCount}/${count}` : "—"}</strong> subtarefas OK</span>
+      <span><strong>${Math.round(percent)}%</strong> completo</span>`;
+  }
+
+  addSubtaskRow() {
+    if (!this.checklistDraft) return;
+    this.checklistDraft.subtasks.push({
+      id: this.generateId(),
+      name: "",
+      description: "",
+      hours: 1,
+      done: false,
+    });
+    this.renderChecklist();
+    const names = document.querySelectorAll("#checklist-tbody .col-name input");
+    if (names.length) names[names.length - 1].focus();
+  }
+
+  removeSubtaskRow(index) {
+    if (!this.checklistDraft) return;
+    this.checklistDraft.subtasks.splice(index, 1);
+    this.renderChecklist();
+  }
+
+  updateSubtask(index, field, value) {
+    const sub = this.checklistDraft && this.checklistDraft.subtasks[index];
+    if (!sub) return;
+    sub[field] = field === "hours" ? Math.max(0, parseFloat(value) || 0) : value;
+    // No re-render here: it would steal focus from the input being typed in
+    this.renderChecklistSummary();
+  }
+
+  saveChecklist() {
+    const draft = this.checklistDraft;
+    if (!draft) return;
+    const task = this.currentProject.tasks.find((t) => t.id === draft.taskId);
+    if (!task) return;
+
+    const subtasks = draft.subtasks.filter((s) => s.name.trim());
+    task.description = draft.description.trim();
+    task.subtasks = subtasks.map((s) => ({ ...s, name: s.name.trim() }));
+    task.completed = subtasks.length ? false : draft.completed;
+
+    this.saveState();
+    this.updateUI();
+    this.autoSave();
+    this.hideChecklistModal();
+    this.showToast(
+      "success",
+      "Checklist Salvo",
+      `"${task.name}": ${this.formatHours(this.getTaskHours(task))}h em ${subtasks.length} subtarefa(s).`
+    );
+  }
+
+  showLogicModal(taskId) {
+    const task = this.currentProject.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    this.currentLogicTaskId = taskId;
+    const editor = document.getElementById("task-logic-editor");
+    editor.value = task.logic || "";
+
+    document.getElementById("logic-modal-title").textContent = `Lógica: ${task.name}`;
+    document.getElementById("logic-modal").classList.remove("hidden");
+
+    // Save button handler
+    const saveBtn = document.getElementById("logic-modal-save");
+    saveBtn.onclick = () => {
+      task.logic = editor.value;
+      this.saveState();
+      this.autoSave();
+      this.hideLogicModal();
+      this.showToast("success", "Lógica Salva", `A lógica da tarefa "${task.name}" foi atualizada.`);
+    };
+  }
+
+  hideLogicModal() {
+    document.getElementById("logic-modal").classList.add("hidden");
+    this.currentLogicTaskId = null;
+  }
+
   loadFromAutoSave() {
     try {
       const autoSaveData = JSON.parse(
         localStorage.getItem("sizing-calculator-autosave")
       );
       if (autoSaveData && autoSaveData.project) {
-        this.currentProject = autoSaveData.project;
+        this.currentProject = this.normalizeProject(autoSaveData.project);
         this.updateUI();
         this.updateChart();
         this.updateBreadcrumb();
@@ -1189,7 +2095,6 @@ class SizingCalculator {
           this.currentProject.name === "Novo Projeto"
             ? ""
             : this.currentProject.name;
-        document.getElementById("task-unit").value = this.currentProject.unit;
 
         this.showToast("info", "Auto-save", "Projeto restaurado do auto-save!");
         return true;
@@ -1325,12 +2230,8 @@ class SizingCalculator {
                         </div>
                     </div>
                     <div class="project-card-actions">
-                        <button class="btn btn--sm btn--secondary" onclick="event.stopPropagation(); app.duplicateProject('${
-                          project.id
-                        }')" title="Duplicar">📋</button>
-                        <button class="btn btn--sm btn--outline" onclick="event.stopPropagation(); app.deleteProject('${
-                          project.id
-                        }')" title="Excluir">🗑️</button>
+                        <button class="btn btn--sm btn--secondary" onclick="event.stopPropagation(); app.duplicateProject('${project.id}')" title="Duplicar">Copiar</button>
+                        <button class="btn btn--sm btn--outline" onclick="event.stopPropagation(); app.deleteProject('${project.id}')" title="Excluir">Excluir</button>
                     </div>
                 </div>
                 <div class="project-card-preview">
@@ -1338,15 +2239,24 @@ class SizingCalculator {
                 </div>
                 <div class="project-card-stats">
                     <span>${project.tasks.length} tarefas</span>
-                    <span>${project.tasks.reduce(
-                      (sum, task) => sum + task.duration,
-                      0
-                    )} ${project.unit === "days" ? "dias" : "horas"}</span>
+                    <span>${this.formatHours(this.getProjectHours(project))} horas</span>
                 </div>
             </div>
         `
       )
       .join("");
+  }
+
+  /** Total hours of a saved project (old ones may still be in days). */
+  getProjectHours(project) {
+    const factor = project.unit === "days" ? configManager.getHoursPerDay() : 1;
+    return project.tasks.reduce((sum, t) => {
+      const subs = t.subtasks || [];
+      const hours = subs.length
+        ? subs.reduce((n, st) => n + (Number(st.hours) || 0), 0)
+        : (Number(t.duration) || 0) * factor;
+      return sum + hours;
+    }, 0);
   }
 
   generateProjectPreview(project) {
@@ -1396,13 +2306,8 @@ class SizingCalculator {
         }
       }
 
-      // ✨ NOVO: Deep clone para evitar referências
-      this.currentProject = JSON.parse(JSON.stringify(project));
-
-      // ✨ NOVO: Garantir que startDate existe
-      if (!this.currentProject.startDate) {
-        this.currentProject.startDate = new Date().toISOString().split("T")[0];
-      }
+      // ✨ NOVO: Deep clone para evitar referências e normalizar
+      this.currentProject = this.normalizeProject(JSON.parse(JSON.stringify(project)));
 
       // Reset history
       this.history = [];
@@ -1416,7 +2321,6 @@ class SizingCalculator {
       // Atualizar inputs
       document.getElementById("project-name").value =
         this.currentProject.name || "Novo Projeto";
-      document.getElementById("task-unit").value = this.currentProject.unit;
 
       // ✨ NOVO: Atualizar campo de data
       const dateInput = document.getElementById("project-start-date");
@@ -1485,11 +2389,15 @@ class SizingCalculator {
       this.currentProject.startDate = new Date().toISOString().split("T")[0];
     }
 
+    const hoursPerDay = configManager.getHoursPerDay();
     const startDate = new Date(this.currentProject.startDate);
-    startDate.setDate(startDate.getDate() + task.start);
+    startDate.setDate(startDate.getDate() + Math.floor(task.start / hoursPerDay));
 
     // Calcular com dias úteis
-    const endDate = configManager.calculateEndDate(startDate, task.duration);
+    const endDate = configManager.calculateEndDate(
+      startDate,
+      Math.ceil(task.duration / hoursPerDay)
+    );
     return endDate;
   }
 
@@ -1589,18 +2497,16 @@ class SizingCalculator {
 
     const headers = [
       "Nome",
-      "Início",
-      "Duração",
-      "Unidade",
+      "Horas",
+      "Progresso (%)",
       "Prioridade",
       "Categoria",
       "Dependências",
     ];
     const rows = this.currentProject.tasks.map((task) => [
       task.name,
-      task.start,
-      task.duration,
-      this.currentProject.unit,
+      this.formatHours(this.getTaskHours(task)),
+      Math.round(this.getTaskProgress(task).percent),
       this.getPriorityLabel(task.priority),
       task.category,
       this.getDependenciesText(task).replace("-", ""),
@@ -1616,6 +2522,170 @@ class SizingCalculator {
       "text/csv"
     );
     this.showToast("success", "Exportado", "Arquivo CSV baixado com sucesso!");
+  }
+
+  async exportXLSX() {
+    const tasks = this.currentProject.tasks;
+    if (tasks.length === 0) {
+      this.showToast("warning", "Aviso", "Não há tarefas para exportar.");
+      return;
+    }
+    if (typeof ExcelJS === "undefined") {
+      this.showToast("error", "Erro", "Biblioteca de Excel não carregou (verifique a conexão).");
+      return;
+    }
+
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Sizing");
+    ws.columns = [
+      { width: 40 },
+      { width: 70 },
+      { width: 10 },
+      { width: 10 },
+      { width: 8, hidden: true }, // E: 1 on rows that count toward the totals
+    ];
+
+    const HEADER_ROW = 6;
+    const FIRST = HEADER_ROW + 1;
+    const border = { style: "thin", color: { argb: "FFD0D5DD" } };
+    const box = { top: border, left: border, bottom: border, right: border };
+    const fill = (argb) => ({ type: "pattern", pattern: "solid", fgColor: { argb } });
+
+    ws.mergeCells("A1:D1");
+    ws.getCell("A1").value = this.currentProject.name;
+    ws.getCell("A1").font = { bold: true, size: 16 };
+
+    // Build rows first so the summary formulas know the data range
+    const rows = [];
+    tasks.forEach((task) => {
+      const subs = task.subtasks || [];
+      if (subs.length) {
+        rows.push({ kind: "group", task, subs });
+        subs.forEach((s) => rows.push({ kind: "sub", s }));
+      } else {
+        rows.push({ kind: "single", task });
+      }
+    });
+    const LAST = FIRST + rows.length - 1;
+
+    const totalHours = this.getTotalHours();
+    const doneHours = this.getDoneHours();
+    const labelStyle = { bold: true };
+    const hoursPerDay = configManager.getHoursPerDay();
+    ws.getCell("A5").value = `Dias úteis (${hoursPerDay}h/dia)`;
+    ws.getCell("A5").font = labelStyle;
+    ws.getCell("B5").value = { formula: `B3/${hoursPerDay}`, result: totalHours / hoursPerDay };
+    ws.getCell("B5").numFmt = "0.0";
+    ws.getCell("B5").font = { bold: true, size: 12 };
+    ws.getCell("B5").alignment = { horizontal: "left" };
+    [
+      [2, "Progresso", `IFERROR(B4/B3,0)`, totalHours ? doneHours / totalHours : 0, "0%"],
+      [3, "Horas totais", `SUMIF(E${FIRST}:E${LAST},1,C${FIRST}:C${LAST})`, totalHours, "0.##"],
+      [4, "Horas concluídas", `SUMIFS(C${FIRST}:C${LAST},E${FIRST}:E${LAST},1,D${FIRST}:D${LAST},"OK")`, doneHours, "0.##"],
+    ].forEach(([r, label, formula, result, numFmt]) => {
+      ws.getCell(`A${r}`).value = label;
+      ws.getCell(`A${r}`).font = labelStyle;
+      const cell = ws.getCell(`B${r}`);
+      cell.value = { formula, result };
+      cell.numFmt = numFmt;
+      cell.font = { bold: true, size: 12 };
+      cell.alignment = { horizontal: "left" };
+    });
+
+    const header = ws.getRow(HEADER_ROW);
+    header.values = ["Tarefa", "Descrição detalhada", "Horas", "OK", "Contar"];
+    header.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+      cell.fill = fill("FF1F4E79");
+      cell.border = box;
+      cell.alignment = { vertical: "middle" };
+    });
+
+    const okFill = fill("FFC6EFCE");
+    rows.forEach((item, i) => {
+      const r = FIRST + i;
+      const row = ws.getRow(r);
+
+      if (item.kind === "group") {
+        const first = r + 1;
+        const last = r + item.subs.length;
+        const doneCount = item.subs.filter((s) => s.done).length;
+        const allDone = doneCount === item.subs.length;
+        row.getCell(1).value = item.task.name;
+        row.getCell(2).value = item.task.description || "";
+        row.getCell(3).value = {
+          formula: `SUM(C${first}:C${last})`,
+          result: this.getTaskHours(item.task),
+        };
+        row.getCell(4).value = {
+          formula: `IF(COUNTIF(D${first}:D${last},"OK")=ROWS(D${first}:D${last}),"OK",COUNTIF(D${first}:D${last},"OK")&"/"&ROWS(D${first}:D${last}))`,
+          result: allDone ? "OK" : `${doneCount}/${item.subs.length}`,
+        };
+        row.eachCell({ includeEmpty: true }, (cell, col) => {
+          if (col > 4) return;
+          cell.font = { bold: true };
+          cell.fill = fill(allDone ? "FFC6EFCE" : "FFDDEBF7");
+          cell.border = box;
+        });
+      } else {
+        const isSub = item.kind === "sub";
+        const name = isSub ? item.s.name : item.task.name;
+        const description = isSub ? item.s.description : item.task.description;
+        const hours = isSub ? Number(item.s.hours) || 0 : this.getDurationInHours(item.task);
+        const done = isSub ? item.s.done : item.task.completed;
+
+        row.getCell(1).value = name;
+        row.getCell(1).alignment = { indent: isSub ? 2 : 0, vertical: "top" };
+        row.getCell(2).value = description || "";
+        row.getCell(3).value = hours;
+        row.getCell(4).value = done ? "OK" : "";
+        row.getCell(5).value = 1;
+        row.getCell(4).dataValidation = {
+          type: "list",
+          allowBlank: true,
+          formulae: ['"OK"'],
+        };
+        for (let c = 1; c <= 4; c++) {
+          const cell = row.getCell(c);
+          cell.border = box;
+          if (!isSub) cell.font = { bold: true };
+          if (done && c === 4) cell.fill = okFill;
+        }
+      }
+
+      row.getCell(2).alignment = { wrapText: true, vertical: "top" };
+      row.getCell(3).alignment = { horizontal: "center", vertical: "top" };
+      row.getCell(4).alignment = { horizontal: "center", vertical: "top" };
+      row.getCell(3).numFmt = "0.##";
+    });
+
+    // "OK" cells turn green when ticked in Excel too
+    ws.addConditionalFormatting({
+      ref: `D${FIRST}:D${LAST}`,
+      rules: [
+        {
+          type: "cellIs",
+          operator: "equal",
+          formulae: ['"OK"'],
+          style: { fill: { type: "pattern", pattern: "solid", bgColor: { argb: "FFC6EFCE" } } },
+        },
+      ],
+    });
+
+    ws.views = [{ state: "frozen", ySplit: HEADER_ROW }];
+
+    try {
+      const buffer = await wb.xlsx.writeBuffer();
+      this.downloadFile(
+        buffer,
+        `${this.currentProject.name.replace(/[^a-z0-9]/gi, "_")}.xlsx`,
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      );
+      this.showToast("success", "Exportado", "Arquivo Excel baixado com sucesso!");
+    } catch (error) {
+      console.error("XLSX export error:", error);
+      this.showToast("error", "Erro", "Falha ao gerar o Excel.");
+    }
   }
 
   exportJSON() {
@@ -1689,31 +2759,24 @@ class SizingCalculator {
     const toast = document.createElement("div");
     toast.className = `toast toast--${type}`;
 
-    const icons = {
-      success: "✅",
-      error: "❌",
-      warning: "⚠️",
-      info: "ℹ️",
-    };
-
     toast.innerHTML = `
             <div class="toast-content">
-                <div class="toast-icon">${icons[type] || "ℹ️"}</div>
+                <div class="toast-icon"></div>
                 <div class="toast-message">
                     <div class="toast-title">${title}</div>
                     <p class="toast-description">${message}</p>
                 </div>
             </div>
-            <button class="toast-close" onclick="this.parentElement.remove()">×</button>
+            <button class="toast-close" onclick="this.parentElement.remove()" aria-label="Fechar">×</button>
         `;
 
     container.appendChild(toast);
 
-    // Auto remove after 5 seconds
+    // Auto remove after 5 seconds (with a short exit animation)
     setTimeout(() => {
-      if (toast.parentElement) {
-        toast.remove();
-      }
+      if (!toast.parentElement) return;
+      toast.classList.add("toast--leaving");
+      setTimeout(() => toast.remove(), 220);
     }, 5000);
   }
 
